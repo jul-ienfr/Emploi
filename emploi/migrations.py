@@ -65,11 +65,14 @@ def migrate(conn: sqlite3.Connection) -> None:
             contract TEXT NOT NULL DEFAULT '',
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_run_at TEXT NOT NULL DEFAULT ''
+            last_run_at TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_saved_searches_enabled_name
         ON saved_searches (enabled, name);
         """
     )
+    _add_column_if_missing(conn, "saved_searches", "notes", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "applications", "draft_path", "TEXT NOT NULL DEFAULT ''")
     conn.commit()

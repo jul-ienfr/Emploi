@@ -74,6 +74,24 @@ emploi ft apply 1 --draft
 emploi ft apply 1 --open
 ```
 
+Imports multi-sources sans scraping direct :
+
+```bash
+emploi import offers ./offers.json --source indeed
+emploi import offers ./offers.csv --source linkedin --format csv
+emploi import offers ./wttj.json --source welcome-to-the-jungle --json
+```
+
+`emploi import offers` charge uniquement des fichiers locaux JSON/CSV. Les champs reconnus restent volontairement simples : `title`, `company`, `location`, `url`, `source`, `description`, `salary`, `remote`, `contract_type`, `notes`, `external_id`. Le JSON peut être une liste d'offres ou un objet `{ "offers": [...] }`; le CSV doit contenir une ligne d'en-têtes. L'import met à jour les doublons via `(external_source, external_id)` quand `external_id` est présent, sinon via l'URL.
+
+Sources/adapters prévus pour les évolutions futures :
+
+- `indeed` — import d'exports/fichiers préparés Indeed, sans scraping direct.
+- `welcome-to-the-jungle` — import d'exports/fichiers préparés Welcome to the Jungle.
+- `linkedin` — import d'exports/fichiers préparés LinkedIn.
+- `local-site` — import depuis sites locaux/régionaux ou pages entreprises converties en JSON/CSV.
+- `remote-freelance` — import depuis sources remote/freelance converties en JSON/CSV.
+
 Profils de recherche sauvegardés :
 
 ```bash
@@ -87,12 +105,34 @@ Candidatures et pilotage opérateur :
 
 ```bash
 emploi apply 1
+emploi application draft 1
 emploi application list
+emploi application followup 1 2026-05-04
 emploi next
+emploi brief
+emploi brief --json
 emploi report
 ```
 
-`emploi next` propose les prochaines actions utiles à partir des offres France Travail actives à fort score et des candidatures en brouillon/envoyées. `emploi report` inclut le résumé local historique plus des compteurs France Travail/browser-backed (offres FT, offres FT actives, brouillons, candidatures envoyées).
+`emploi next` propose les prochaines actions utiles à partir des offres France Travail actives à fort score et des candidatures en brouillon/envoyées. `emploi brief` est le point quotidien recommandé : meilleures offres, actions prioritaires, relances dues, candidatures envoyées devenues stale, blockers (Managed Browser/profils) et stats 7 jours. `emploi brief --json` ne sort que du JSON parseable. `emploi report` conserve le résumé local historique plus des compteurs France Travail/browser-backed (offres FT, offres FT actives, brouillons, candidatures envoyées).
+
+## Workflow quotidien Julien
+
+```bash
+emploi doctor --json
+emploi search-profile install-julien-defaults
+emploi search-profile run --all
+emploi brief
+emploi next
+emploi ft apply <offer-id> --check
+emploi application draft <offer-id>
+emploi ft apply <offer-id> --open
+```
+
+1. Vérifier d'abord `emploi doctor --json`; si Managed Browser est indisponible, corriger `EMPLOI_MANAGED_BROWSER_COMMAND` ou utiliser les données locales/imports sans scraping direct.
+2. Installer une fois les profils Julien par défaut, puis lancer les profils actifs pour rafraîchir France Travail.
+3. Lire `emploi brief` pour décider la journée: meilleures offres, relances et blockers; utiliser `emploi next` pour la liste d'actions détaillée.
+4. Pour candidater, rester en mode assisté: `--check`, brouillon local, ouverture navigateur; aucune soumission automatique.
 
 ## Skill Hermes
 

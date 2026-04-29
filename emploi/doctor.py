@@ -24,7 +24,7 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     if managed_browser["status"] == "missing":
         actions.append("Installer/configurer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND.")
     elif managed_browser["status"] != "ok":
-        actions.append("Vérifier que le profil Managed Browser emploi/france-travail est disponible et connecté.")
+        actions.append("Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser emploi/france-travail est disponible et connecté.")
 
     return {
         "status": status,
@@ -58,21 +58,56 @@ def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
     if executable is None:
         return {
             "status": "missing",
+            "available": False,
+            "probe": "not_run",
+            "can_run_smoke": False,
             "command": client.command,
+            "path": None,
             "error": f"Command not found: {client.command}",
+            "remediation": "Installer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND vers l'exécutable correct, puis lancer `emploi browser smoke --json`.",
         }
-    result: dict[str, Any] = {"status": "available", "command": client.command, "path": executable}
+    result: dict[str, Any] = {
+        "status": "available",
+        "available": True,
+        "probe": "skipped",
+        "can_run_smoke": True,
+        "command": client.command,
+        "path": executable,
+        "remediation": "Lancer `emploi browser smoke --json` pour vérifier le profil avant un flux réel.",
+    }
     if not probe:
         return result
     try:
         status = client.status()
     except ManagedBrowserUnavailableError as exc:
-        return {"status": "missing", "command": client.command, "path": executable, "error": str(exc)}
+        return {
+            "status": "missing",
+            "available": False,
+            "probe": "failed",
+            "can_run_smoke": False,
+            "command": client.command,
+            "path": executable,
+            "error": str(exc),
+            "remediation": "Vérifier EMPLOI_MANAGED_BROWSER_COMMAND et relancer `emploi browser smoke --json`.",
+        }
     except ManagedBrowserError as exc:
-        return {"status": "error", "command": client.command, "path": executable, "error": str(exc)}
+        return {
+            "status": "error",
+            "available": True,
+            "probe": "failed",
+            "can_run_smoke": False,
+            "command": client.command,
+            "path": executable,
+            "error": str(exc),
+            "remediation": "Relancer `emploi browser smoke --json`, déverrouiller/connecter le profil Managed Browser emploi/france-travail si nécessaire.",
+        }
     return {
         "status": "ok",
+        "available": True,
+        "probe": "ok",
+        "can_run_smoke": True,
         "command": client.command,
         "path": executable,
         "payload": status.payload,
+        "remediation": "",
     }

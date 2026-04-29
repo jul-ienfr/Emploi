@@ -23,7 +23,11 @@ def test_doctor_json_reports_ready_core_and_missing_browser(tmp_path, monkeypatc
     assert payload["database"]["status"] == "ok"
     assert payload["database"]["path"] == str(db_path)
     assert payload["managed_browser"]["status"] == "missing"
+    assert payload["managed_browser"]["available"] is False
+    assert payload["managed_browser"]["probe"] == "not_run"
+    assert payload["managed_browser"]["can_run_smoke"] is False
     assert payload["managed_browser"]["command"] == "definitely-missing-managed-browser"
+    assert "EMPLOI_MANAGED_BROWSER_COMMAND" in payload["managed_browser"]["remediation"]
     assert payload["recommended_actions"]
 
 
@@ -46,7 +50,11 @@ def test_doctor_json_reports_healthy_browser_when_status_probe_succeeds(tmp_path
     payload = json.loads(result.stdout)
     assert payload["status"] == "ok"
     assert payload["managed_browser"]["status"] == "ok"
+    assert payload["managed_browser"]["available"] is True
+    assert payload["managed_browser"]["probe"] == "ok"
+    assert payload["managed_browser"]["can_run_smoke"] is True
     assert payload["managed_browser"]["payload"] == {"ok": True, "state": "ready"}
+    assert payload["managed_browser"]["remediation"] == ""
     assert payload["recommended_actions"] == []
 
 
@@ -64,9 +72,13 @@ def test_doctor_json_reports_browser_probe_error(tmp_path, monkeypatch):
     payload = json.loads(result.stdout)
     assert payload["status"] == "degraded"
     assert payload["managed_browser"]["status"] == "error"
+    assert payload["managed_browser"]["available"] is True
+    assert payload["managed_browser"]["probe"] == "failed"
+    assert payload["managed_browser"]["can_run_smoke"] is False
     assert "profile locked" in payload["managed_browser"]["error"]
+    assert "emploi browser smoke" in payload["managed_browser"]["remediation"]
     assert payload["recommended_actions"] == [
-        "Vérifier que le profil Managed Browser emploi/france-travail est disponible et connecté."
+        "Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser emploi/france-travail est disponible et connecté."
     ]
 
 

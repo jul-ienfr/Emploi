@@ -99,17 +99,26 @@ emploi search-profile run --all
 Pour une routine de recherche, commencer par :
 
 ```bash
+emploi doctor --json
+emploi search-profile install-julien-defaults
 emploi search-profile list
 emploi search-profile run --all
+emploi brief
+emploi brief --json
 emploi next
 emploi report
 ```
+
+`emploi brief` est le briefing quotidien Julien : meilleures offres, actions prioritaires, relances dues, candidatures envoyées sans contact récent, blockers et stats 7 jours. Utiliser `emploi brief --json` quand un agent doit parser le résultat : la sortie doit rester du JSON pur, sans bruit Rich.
 
 ### Candidatures et pilotage opérateur
 
 ```bash
 emploi apply 1
+emploi application draft 1
 emploi application list
+emploi application followup 1 2026-05-04
+emploi brief
 emploi next
 emploi report
 ```
@@ -127,11 +136,13 @@ emploi report
    ```
 3. Si Julien demande une recherche France Travail :
    - vérifier que Managed Browser est disponible ;
+   - installer les profils par défaut si besoin avec `emploi search-profile install-julien-defaults` ;
    - exécuter `emploi search-profile run --all` ou `emploi ft search ...` ;
-   - finir par `emploi next` et `emploi report`.
-4. Pour une candidature :
+   - finir par `emploi brief`, puis `emploi next` si des actions détaillées sont nécessaires.
+4. Pour une candidature assistée :
    - utiliser d'abord `emploi ft apply <id> --check` ;
-   - puis éventuellement `emploi ft apply <id> --draft` ou `--open` ;
+   - puis éventuellement `emploi application draft <id>` ou `emploi ft apply <id> --draft` ;
+   - ouvrir manuellement avec `emploi ft apply <id> --open` si Julien veut finaliser ;
    - ne jamais cliquer/soumettre automatiquement une candidature réelle sans validation explicite.
 5. Pour modifier le CLI : suivre TDD strict, puis :
    ```bash

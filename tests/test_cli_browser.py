@@ -119,3 +119,43 @@ def test_browser_unavailable_shows_clear_error_without_traceback(monkeypatch):
     assert 'Managed Browser command not found' in result.stdout
     assert 'Traceback' not in result.stdout
     assert isinstance(result.exception, SystemExit)
+
+
+def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1] == 'status':
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'state': 'ready'}), stderr='')
+        if args[1] == 'snapshot':
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'text': 'France Travail'}), stderr='')
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+
+    result = runner.invoke(app, ['browser', 'smoke', '--json'])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload['status'] == 'ok'
+    assert payload['site'] == 'france-travail'
+    assert payload['profile'] == 'emploi'
+    assert payload['checks']['status']['payload']['state'] == 'ready'
+    assert payload['checks']['snapshot']['payload']['text'] == 'France Travail'
+    assert [call[1] for call in calls] == ['status', 'snapshot']
+
+
+def test_browser_smoke_dry_run_json_does_not_call_managed_browser(monkeypatch):
+    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+
+    result = runner.invoke(app, ['browser', 'smoke', '--dry-run', '--json'])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload['status'] == 'dry-run'
+    assert payload['would_run'] == ['status', 'snapshot']
+    assert payload['submit_application'] is False

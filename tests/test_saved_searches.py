@@ -153,6 +153,86 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     assert any(call[1] == "open" for call in calls)
 
 
+def test_install_default_julien_search_profiles_is_idempotent_and_contextual(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+
+    from emploi.db import install_default_julien_search_profiles
+
+    first = install_default_julien_search_profiles(conn)
+    second = install_default_julien_search_profiles(conn)
+    searches = list_saved_searches(conn)
+
+    assert len(first["created"]) >= 4
+    assert first["skipped"] == []
+    assert second["created"] == []
+    assert {item["name"] for item in second["skipped"]} == {row["name"] for row in searches}
+    assert len(searches) == len(first["created"])
+    combined = "\n".join(
+        f"{row['name']} {row['query']} {row['where_text']} {row['contract']} {row['notes']}" for row in searches
+    ).lower()
+    assert "bogève" in combined
+    assert "télétravail" in combined
+    assert "python" in combined
+    assert "support" in combined
+    assert "admin système" in combined
+    assert "sans voiture" in combined
+    assert all(row["enabled"] == 1 for row in searches)
+
+
+def test_search_profile_cli_install_defaults_and_improved_list_output(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+
+    installed = runner.invoke(app, ["search-profile", "install-julien-defaults"])
+    installed_again = runner.invoke(app, ["search-profile", "install-julien-defaults"])
+    listed = runner.invoke(app, ["search-profile", "list"])
+
+    assert installed.exit_code == 0
+    assert "créé" in installed.stdout
+    assert "Bogève" in installed.stdout
+    assert installed_again.exit_code == 0
+    assert "ignoré" in installed_again.stdout
+    assert listed.exit_code == 0
+    assert "Actif" in listed.stdout
+    assert "Dernier run" in listed.stdout
+    assert "jamais" in listed.stdout
+    assert "Notes" in listed.stdout
+    assert "sans voiture" in listed.stdout
+
+
+def test_search_profile_run_all_reports_created_updated_enabled_and_last_run(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+
+    add = runner.invoke(app, ["search-profile", "add", "support", "--query", "support", "--where", "Annecy"])
+    assert add.exit_code == 0
+
+    def fake_run_saved_search(conn, search_id_or_name, *, site="france-travail", profile="emploi"):
+        saved = get_saved_search(conn, search_id_or_name)
+        update_saved_search_last_run(conn, int(saved["id"]), "2026-04-29T12:00:00+00:00")
+        from emploi.france_travail.flows import SearchImportResult
+
+        return [
+            SearchImportResult(1, True, "Technicien support", 80, "https://example.test/1"),
+            SearchImportResult(2, False, "Support N2", 70, "https://example.test/2"),
+        ]
+
+    monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
+
+    ran = runner.invoke(app, ["search-profile", "run", "--all"])
+    listed = runner.invoke(app, ["search-profile", "list"])
+
+    assert ran.exit_code == 0
+    assert "profil(s) actif(s)" in ran.stdout
+    assert "créée(s): 1" in ran.stdout
+    assert "mise(s) à jour: 1" in ran.stdout
+    assert "Dernier run" in ran.stdout
+    assert "2026-04-29T12:00:00+00:00" in ran.stdout
+    assert listed.exit_code == 0
+    assert "2026-04-29T12:00:00+00:00" in listed.stdout
+
+
 def test_report_summary_and_next_actions_include_ft_operator_counts(tmp_path, monkeypatch):
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))

@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
+from emploi.applications import create_application_draft
 from emploi.db import add_offer, add_offer_event, get_offer, get_saved_search, update_saved_search_last_run
 from emploi.france_travail.extractors import ExtractedOffer, extract_offer_detail, extract_offers
 from emploi.scoring import score_offer
@@ -312,36 +313,8 @@ def _safe_slug(value: str) -> str:
 
 
 def draft_application(conn, offer_id: int, *, drafts_dir: str | Path | None = None) -> DraftResult:
-    offer = get_offer(conn, offer_id)
-    if offer is None:
-        raise ValueError(f"Offre introuvable: {offer_id}")
-    base = Path(drafts_dir) if drafts_dir is not None else Path.home() / ".local" / "share" / "emploi" / "drafts"
-    base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{offer_id}-{_safe_slug(offer['title'])}.md"
-    path.write_text(
-        "\n".join(
-            [
-                f"# Candidature brouillon — {offer['title']}",
-                "",
-                f"Entreprise: {offer['company']}",
-                f"Lieu: {offer['location']}",
-                f"URL: {_offer_url(offer)}",
-                "",
-                "## Notes",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    cursor = conn.execute(
-        "INSERT INTO applications (offer_id, status, notes) VALUES (?, ?, ?)",
-        (offer_id, "draft", f"Draft: {path}"),
-    )
-    conn.execute("UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ("draft", offer_id))
-    conn.commit()
-    application_id = int(cursor.lastrowid)
-    add_offer_event(conn, offer_id, event_type="application_draft", message=str(path))
-    return DraftResult(offer_id, application_id, path)
+    result = create_application_draft(conn, offer_id, drafts_dir=drafts_dir)
+    return DraftResult(result.offer_id, result.application_id, result.draft_path)
 
 
 def open_offer(conn, offer_id: int, *, browser: BrowserLike | None = None, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> str:

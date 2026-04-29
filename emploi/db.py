@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import Iterable
 
@@ -10,6 +11,9 @@ from emploi.scoring import score_offer
 
 
 DEFAULT_DB_PATH = Path.home() / ".local" / "share" / "emploi" / "emploi.sqlite"
+APPLICATION_STATUSES = frozenset(
+    {"analyzed", "interesting", "draft", "sent", "followup", "response", "rejected", "interview"}
+)
 
 
 def db_path() -> Path:
@@ -53,6 +57,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             last_contact_at TEXT NOT NULL DEFAULT '',
             next_action_at TEXT NOT NULL DEFAULT '',
+            draft_path TEXT NOT NULL DEFAULT '',
             notes TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (offer_id) REFERENCES offers(id)
         );
@@ -91,7 +96,11 @@ def add_offer(
             "company": company,
             "location": location,
             "description": description,
+            "salary": salary,
+            "remote": remote,
+            "contract_type": contract_type,
             "notes": notes,
+            "raw_extracted_text": raw_extracted_text,
         }
     )
     cursor = conn.execute(
@@ -200,6 +209,81 @@ def add_application(
     return int(cursor.lastrowid)
 
 
+def get_application(conn: sqlite3.Connection, application_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM applications WHERE id = ?", (application_id,)).fetchone()
+
+
+def validate_application_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized not in APPLICATION_STATUSES:
+        allowed = ", ".join(sorted(APPLICATION_STATUSES))
+        raise ValueError(f"Statut invalide: {status}. Statuts autorisés: {allowed}")
+    return normalized
+
+
+def update_application_status(conn: sqlite3.Connection, application_id: int, status: str) -> sqlite3.Row:
+    normalized = validate_application_status(status)
+    application = get_application(conn, application_id)
+    if application is None:
+        raise ValueError(f"Candidature introuvable: {application_id}")
+    conn.execute(
+        "UPDATE applications SET status = ?, last_contact_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (normalized, application_id),
+    )
+    update_offer_status(conn, int(application["offer_id"]), normalized)
+    conn.commit()
+    updated = get_application(conn, application_id)
+    assert updated is not None
+    return updated
+
+
+def schedule_application_followup(conn: sqlite3.Connection, application_id: int, followup_date: str) -> sqlite3.Row:
+    try:
+        date.fromisoformat(followup_date)
+    except ValueError as error:
+        raise ValueError("La date de relance doit être au format ISO YYYY-MM-DD") from error
+    update_application_status(conn, application_id, "followup")
+    conn.execute(
+        "UPDATE applications SET next_action_at = ? WHERE id = ?",
+        (followup_date, application_id),
+    )
+    conn.commit()
+    updated = get_application(conn, application_id)
+    assert updated is not None
+    return updated
+
+
+def upsert_draft_application(
+    conn: sqlite3.Connection,
+    offer_id: int,
+    *,
+    draft_path: str,
+    notes: str = "",
+) -> int:
+    if get_offer(conn, offer_id) is None:
+        raise ValueError(f"Offre introuvable: {offer_id}")
+    existing = conn.execute(
+        "SELECT * FROM applications WHERE offer_id = ? AND status = 'draft' ORDER BY id DESC LIMIT 1",
+        (offer_id,),
+    ).fetchone()
+    stored_notes = notes or f"Draft: {draft_path}"
+    if existing is not None:
+        conn.execute(
+            "UPDATE applications SET draft_path = ?, notes = ? WHERE id = ?",
+            (draft_path, stored_notes, existing["id"]),
+        )
+        application_id = int(existing["id"])
+    else:
+        cursor = conn.execute(
+            "INSERT INTO applications (offer_id, status, draft_path, notes) VALUES (?, ?, ?, ?)",
+            (offer_id, "draft", draft_path, stored_notes),
+        )
+        application_id = int(cursor.lastrowid)
+    conn.execute("UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ("draft", offer_id))
+    conn.commit()
+    return application_id
+
+
 def record_browser_session(
     conn: sqlite3.Connection,
     *,
@@ -285,16 +369,77 @@ def add_saved_search(
     radius: int = 0,
     contract: str = "",
     enabled: bool = True,
+    notes: str = "",
 ) -> int:
     cursor = conn.execute(
         """
-        INSERT INTO saved_searches (name, query, where_text, radius, contract, enabled)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO saved_searches (name, query, where_text, radius, contract, enabled, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, query, where_text, radius, contract, 1 if enabled else 0),
+        (name, query, where_text, radius, contract, 1 if enabled else 0, notes),
     )
     conn.commit()
     return int(cursor.lastrowid)
+
+
+JULIEN_DEFAULT_SEARCH_PROFILES: tuple[dict[str, object], ...] = (
+    {
+        "name": "julien-bogeve-support-it",
+        "query": "technicien support informatique helpdesk proximité",
+        "where_text": "Bogève 74250",
+        "radius": 35,
+        "contract": "CDI",
+        "notes": "Julien: support IT accessible depuis Bogève; mobilité sans voiture, privilégier transports/covoiturage.",
+    },
+    {
+        "name": "julien-teletravail-python",
+        "query": "python télétravail remote développeur junior support automation",
+        "where_text": "Télétravail",
+        "radius": 0,
+        "contract": "CDI",
+        "notes": "Julien: priorité télétravail/remote pour limiter les trajets depuis Bogève sans voiture.",
+    },
+    {
+        "name": "julien-admin-systeme-remote-hybride",
+        "query": "admin système linux windows support télétravail hybride",
+        "where_text": "Haute-Savoie",
+        "radius": 50,
+        "contract": "CDI",
+        "notes": "Julien: admin système ou support N2, hybride réaliste depuis Bogève, contraintes sans voiture.",
+    },
+    {
+        "name": "julien-support-admin-genevois",
+        "query": "support IT administrateur système python",
+        "where_text": "Annemasse Bonneville Genève télétravail",
+        "radius": 45,
+        "contract": "CDI",
+        "notes": "Julien: zones atteignables autour de Bogève sans voiture; remote ou transports obligatoires.",
+    },
+)
+
+
+def install_default_julien_search_profiles(conn: sqlite3.Connection) -> dict[str, list[dict[str, object]]]:
+    result: dict[str, list[dict[str, object]]] = {"created": [], "skipped": [], "enabled": []}
+    for profile in JULIEN_DEFAULT_SEARCH_PROFILES:
+        existing = get_saved_search(conn, str(profile["name"]))
+        if existing is not None:
+            result["skipped"].append({"id": existing["id"], "name": existing["name"]})
+            if existing["enabled"]:
+                result["enabled"].append({"id": existing["id"], "name": existing["name"]})
+            continue
+        search_id = add_saved_search(
+            conn,
+            name=str(profile["name"]),
+            query=str(profile["query"]),
+            where_text=str(profile["where_text"]),
+            radius=int(profile["radius"]),
+            contract=str(profile["contract"]),
+            enabled=True,
+            notes=str(profile["notes"]),
+        )
+        result["created"].append({"id": search_id, "name": profile["name"]})
+        result["enabled"].append({"id": search_id, "name": profile["name"]})
+    return result
 
 
 def list_saved_searches(conn: sqlite3.Connection, *, enabled: bool | None = None) -> list[sqlite3.Row]:
@@ -328,11 +473,19 @@ def update_saved_search_last_run(
     conn.commit()
 
 
-def list_next_actions(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict[str, object]]:
+def list_next_actions(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 10,
+    today: str | None = None,
+    stale_after_days: int = 14,
+) -> list[dict[str, object]]:
+    today_expr = today or date.today().isoformat()
     actions: list[dict[str, object]] = []
     draft_rows = conn.execute(
         """
-        SELECT applications.id AS application_id, offers.id AS offer_id, offers.title, offers.company, offers.score
+        SELECT applications.id AS application_id, applications.draft_path, applications.notes,
+               offers.id AS offer_id, offers.title, offers.company, offers.score
         FROM applications
         JOIN offers ON offers.id = applications.offer_id
         WHERE applications.status = 'draft'
@@ -349,8 +502,69 @@ def list_next_actions(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict
                 "title": row["title"],
                 "company": row["company"],
                 "score": row["score"],
+                "draft_path": row["draft_path"] or row["notes"].replace("Draft: ", "", 1),
+                "guidance": "Relire le brouillon puis envoyer manuellement; aucune soumission automatique.",
             }
         )
+
+    remaining = max(0, limit - len(actions))
+    if remaining:
+        due_rows = conn.execute(
+            """
+            SELECT applications.id AS application_id, applications.next_action_at,
+                   offers.id AS offer_id, offers.title, offers.company, offers.score
+            FROM applications
+            JOIN offers ON offers.id = applications.offer_id
+            WHERE applications.status = 'followup'
+              AND applications.next_action_at != ''
+              AND date(applications.next_action_at) <= date(?)
+            ORDER BY date(applications.next_action_at) ASC, offers.score DESC, applications.id DESC
+            LIMIT ?
+            """,
+            (today_expr, remaining),
+        ).fetchall()
+        for row in due_rows:
+            actions.append(
+                {
+                    "action": "Relancer candidature",
+                    "offer_id": row["offer_id"],
+                    "title": row["title"],
+                    "company": row["company"],
+                    "score": row["score"],
+                    "due_date": row["next_action_at"],
+                    "guidance": "Relance planifiée arrivée à échéance; préparer un message manuel.",
+                }
+            )
+
+    remaining = max(0, limit - len(actions))
+    if remaining:
+        stale_rows = conn.execute(
+            """
+            SELECT applications.id AS application_id, applications.applied_at, applications.last_contact_at,
+                   offers.id AS offer_id, offers.title, offers.company, offers.score
+            FROM applications
+            JOIN offers ON offers.id = applications.offer_id
+            WHERE applications.status = 'sent'
+              AND date(COALESCE(NULLIF(applications.last_contact_at, ''), applications.applied_at)) <= date(?, '-' || ? || ' days')
+            ORDER BY date(COALESCE(NULLIF(applications.last_contact_at, ''), applications.applied_at)) ASC,
+                     offers.score DESC, applications.id DESC
+            LIMIT ?
+            """,
+            (today_expr, stale_after_days, remaining),
+        ).fetchall()
+        for row in stale_rows:
+            last_contact = row["last_contact_at"] or row["applied_at"]
+            actions.append(
+                {
+                    "action": "Relancer candidature envoyée",
+                    "offer_id": row["offer_id"],
+                    "title": row["title"],
+                    "company": row["company"],
+                    "score": row["score"],
+                    "due_date": last_contact,
+                    "guidance": "Candidature envoyée sans contact récent; envisager une relance manuelle.",
+                }
+            )
 
     remaining = max(0, limit - len(actions))
     if remaining:
@@ -375,6 +589,7 @@ def list_next_actions(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict
                     "title": row["title"],
                     "company": row["company"],
                     "score": row["score"],
+                    "guidance": "Nouvelle offre France Travail à vérifier avant action manuelle.",
                 }
             )
     return actions

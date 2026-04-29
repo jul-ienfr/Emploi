@@ -58,3 +58,37 @@ def test_cli_apply_creates_application(tmp_path, monkeypatch):
     assert applications.exit_code == 0
     assert "sent" in applications.stdout
     assert "Support" in applications.stdout
+
+
+def test_cli_offer_show_displays_richer_score_reasons(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+
+    runner.invoke(app, ["init"])
+    add_result = runner.invoke(
+        app,
+        [
+            "offer",
+            "add",
+            "--title",
+            "Support Python",
+            "--location",
+            "Bogève",
+            "--description",
+            "CDI télétravail, débutant accepté, candidature simple.",
+            "--salary",
+            "30k€",
+            "--remote",
+            "remote",
+            "--contract-type",
+            "CDI",
+        ],
+    )
+    assert add_result.exit_code == 0
+
+    show_result = runner.invoke(app, ["offer", "show", "1"])
+
+    assert show_result.exit_code == 0
+    assert "Raisons" in show_result.stdout
+    assert "- Remote: télétravail explicite, très adapté depuis Bogève" in show_result.stdout
+    assert "- Contrat: CDI ou CDD stable" in show_result.stdout

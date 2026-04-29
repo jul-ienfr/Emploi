@@ -40,3 +40,43 @@ def test_score_offer_stays_between_zero_and_one_hundred():
     result = score_offer(offer)
 
     assert 0 <= result.score <= 100
+
+
+def test_score_offer_v2_rewards_julien_remote_local_salary_and_easy_application():
+    offer = {
+        "title": "Développeur Python support automatisation",
+        "location": "Télétravail depuis Bogève",
+        "description": "CDI junior, candidature simple par email, formation possible.",
+        "salary": "32 000 € brut annuel",
+        "remote": "100% télétravail",
+        "contract_type": "CDI",
+    }
+
+    result = score_offer(offer)
+
+    assert result.score >= 90
+    assert "Remote: télétravail explicite, très adapté depuis Bogève" in result.reasons
+    assert "Localisation: Bogève/Haute-Savoie ou zone proche identifiable" in result.reasons
+    assert "Contrat: CDI ou CDD stable" in result.reasons
+    assert "Salaire: rémunération indiquée" in result.reasons
+    assert "Réalisme: profil junior/formation compatible" in result.reasons
+    assert "Candidature: démarche simple" in result.reasons
+
+
+def test_score_offer_v2_penalizes_location_transport_unrealistic_and_high_effort():
+    offer = {
+        "title": "Ingénieur senior commercial terrain",
+        "location": "Annecy, déplacements quotidiens",
+        "description": "Présentiel obligatoire, permis B et véhicule obligatoire. 7 ans d'expérience exigée. Lettre manuscrite, dossier complet et relances téléphoniques demandés.",
+        "remote": "pas de télétravail",
+        "contract_type": "freelance",
+    }
+
+    result = score_offer(offer)
+
+    assert result.score <= 20
+    assert "Remote: présentiel obligatoire ou télétravail absent" in result.reasons
+    assert "Localisation: trajet risqué depuis Bogève sans transport fiable" in result.reasons
+    assert "Contrat: freelance/stage/alternance moins prioritaire" in result.reasons
+    assert "Réalisme: exigences trop élevées pour le profil visé" in result.reasons
+    assert "Candidature: effort élevé ou friction importante" in result.reasons

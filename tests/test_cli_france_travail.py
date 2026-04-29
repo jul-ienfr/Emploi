@@ -111,3 +111,52 @@ def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
     assert open_result.exit_code == 0
     assert "ouverte" in open_result.stdout
     assert any(call[1] == "open" for call in opened)
+
+
+def test_ft_smoke_dry_run_json_does_not_touch_database_or_submit(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+
+    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(app, ["ft", "smoke", "support", "--location", "Annecy", "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "dry-run"
+    assert payload["query"] == "support"
+    assert payload["location"] == "Annecy"
+    assert payload["submit_application"] is False
+    assert payload["database_write"] is False
+    assert "candidat.francetravail.fr/offres/recherche" in payload["search_url"]
+    assert not db_path.exists()
+
+
+def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1] == "open":
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2]}), stderr="")
+        if args[1] == "snapshot":
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "cards": [{"title": "Support"}]}), stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(app, ["ft", "smoke", "support", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["offer_count"] == 1
+    assert payload["database_write"] is False
+    assert payload["submit_application"] is False
+    assert [call[1] for call in calls] == ["open", "snapshot"]
+    assert not db_path.exists()

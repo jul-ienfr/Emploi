@@ -26,6 +26,7 @@ EXPECTED_OFFER_COLUMNS = {
     "raw_browser_snapshot",
     "raw_extracted_text",
 }
+EXPECTED_APPLICATION_COLUMNS = {"draft_path"}
 
 
 def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -79,6 +80,7 @@ def test_migrate_upgrades_existing_db_idempotently(tmp_path):
 
     offer_columns = _column_names(conn, "offers")
     assert EXPECTED_OFFER_COLUMNS.issubset(offer_columns)
+    assert EXPECTED_APPLICATION_COLUMNS.issubset(_column_names(conn, "applications"))
     assert {"id", "site", "profile", "status", "current_url", "updated_at"}.issubset(
         _column_names(conn, "browser_sessions")
     )
@@ -97,6 +99,7 @@ def test_init_db_runs_migrations_for_new_databases(tmp_path):
     init_db(conn)
 
     assert EXPECTED_OFFER_COLUMNS.issubset(_column_names(conn, "offers"))
+    assert EXPECTED_APPLICATION_COLUMNS.issubset(_column_names(conn, "applications"))
     assert "browser_sessions" in {
         row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     }
