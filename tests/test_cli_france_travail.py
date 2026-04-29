@@ -11,14 +11,15 @@ runner = CliRunner()
 
 
 def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     calls = []
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == "open":
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2]}), stderr="")
+        if args[1:4] == ["flow", "run", "open_url"]:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2].removeprefix("url=")}), stderr="")
         if args[1] == "snapshot":
             return subprocess.CompletedProcess(
                 args,
@@ -48,11 +49,12 @@ def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "1 offre" in result.stdout
     assert "Technicien support" in result.stdout
-    assert calls[0][1] == "open"
+    assert calls[0][1:4] == ["flow", "run", "open_url"]
     assert calls[1][1] == "snapshot"
 
 
 def test_ft_refresh_updates_offer(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     conn = connect(db_path)
@@ -77,6 +79,7 @@ def test_ft_refresh_updates_offer(tmp_path, monkeypatch):
 
 
 def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     drafts = tmp_path / "drafts"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
@@ -93,7 +96,7 @@ def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         opened.append(args)
-        if args[1] == "open":
+        if args[1:4] == ["flow", "run", "open_url"]:
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True}), stderr="")
         return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"text": "Candidater maintenant"}), stderr="")
 
@@ -110,10 +113,11 @@ def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
     assert any(drafts.iterdir())
     assert open_result.exit_code == 0
     assert "ouverte" in open_result.stdout
-    assert any(call[1] == "open" for call in opened)
+    assert any(call[1:4] == ["flow", "run", "open_url"] for call in opened)
 
 
 def test_ft_smoke_dry_run_json_does_not_touch_database_or_submit(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
 
@@ -136,14 +140,15 @@ def test_ft_smoke_dry_run_json_does_not_touch_database_or_submit(tmp_path, monke
 
 
 def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     calls = []
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == "open":
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2]}), stderr="")
+        if args[1:4] == ["flow", "run", "open_url"]:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2].removeprefix("url=")}), stderr="")
         if args[1] == "snapshot":
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "cards": [{"title": "Support"}]}), stderr="")
         raise AssertionError(args)
@@ -158,5 +163,5 @@ def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, mo
     assert payload["offer_count"] == 1
     assert payload["database_write"] is False
     assert payload["submit_application"] is False
-    assert [call[1] for call in calls] == ["open", "snapshot"]
+    assert [call[1:4] for call in calls] == [["flow", "run", "open_url"], ["snapshot", "--profile", "emploi"]]
     assert not db_path.exists()

@@ -30,12 +30,12 @@ Variables utiles :
 # Choisir une base locale différente
 export EMPLOI_DB=/tmp/emploi.sqlite
 
-# Commande externe utilisée par ManagedBrowserClient
-# Par défaut: managed-browser
-export EMPLOI_MANAGED_BROWSER_COMMAND=managed-browser
+# Commande externe utilisée par ManagedBrowserClient.
+# Par défaut: managed-browser. Peut aussi pointer vers le wrapper local Camofox:
+export EMPLOI_MANAGED_BROWSER_COMMAND="node /home/jul/tools/camofox-browser/scripts/managed-browser.js"
 ```
 
-La commande Managed Browser doit accepter les sous-commandes utilisées par `emploi`, par exemple `status`, `open`, `snapshot`, `checkpoint`, et renvoyer du JSON sur stdout.
+La commande Managed Browser doit accepter le protocole du wrapper Camofox : `profile status`, `flow run open_url`, `snapshot`, `storage checkpoint`, et renvoyer du JSON sur stdout.
 
 ## Commandes V1
 

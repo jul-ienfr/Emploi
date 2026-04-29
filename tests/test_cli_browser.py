@@ -10,14 +10,16 @@ runner = CliRunner()
 
 
 def test_browser_status_prints_json(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     def fake_run(args, **kwargs):
         assert args == [
             'managed-browser',
+            'profile',
             'status',
-            '--site',
-            'france-travail',
             '--profile',
             'emploi',
+            '--site',
+            'france-travail',
             '--json',
         ]
         return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'state': 'ready'}), stderr='')
@@ -33,6 +35,7 @@ def test_browser_status_prints_json(monkeypatch):
 
 
 def test_browser_open_accepts_url_and_profile_options(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     seen = {}
 
     def fake_run(args, **kwargs):
@@ -57,19 +60,22 @@ def test_browser_open_accepts_url_and_profile_options(monkeypatch):
     assert result.exit_code == 0
     assert seen['args'] == [
         'managed-browser',
-        'open',
-        '--site',
-        'custom-site',
+        'flow',
+        'run',
+        'open_url',
         '--profile',
         'custom-profile',
-        '--url',
-        'https://example.test',
+        '--site',
+        'custom-site',
+        '--param',
+        'url=https://example.test',
         '--json',
     ]
     assert 'https://example.test' in result.stdout
 
 
 def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     calls = []
 
     def fake_run(args, **kwargs):
@@ -86,28 +92,28 @@ def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
     assert calls[0] == [
         'managed-browser',
         'snapshot',
-        '--site',
-        'france-travail',
         '--profile',
         'emploi',
-        '--label',
-        'jobs',
+        '--site',
+        'france-travail',
         '--json',
     ]
     assert calls[1] == [
         'managed-browser',
+        'storage',
         'checkpoint',
-        '--site',
-        'france-travail',
         '--profile',
         'emploi',
-        '--name',
+        '--site',
+        'france-travail',
+        '--reason',
         'after-login',
         '--json',
     ]
 
 
 def test_browser_unavailable_shows_clear_error_without_traceback(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     def fake_run(args, **kwargs):
         raise FileNotFoundError(args[0])
 
@@ -122,11 +128,12 @@ def test_browser_unavailable_shows_clear_error_without_traceback(monkeypatch):
 
 
 def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     calls = []
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == 'status':
+        if args[1:3] == ['profile', 'status']:
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'state': 'ready'}), stderr='')
         if args[1] == 'snapshot':
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'text': 'France Travail'}), stderr='')
@@ -143,10 +150,11 @@ def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
     assert payload['profile'] == 'emploi'
     assert payload['checks']['status']['payload']['state'] == 'ready'
     assert payload['checks']['snapshot']['payload']['text'] == 'France Travail'
-    assert [call[1] for call in calls] == ['status', 'snapshot']
+    assert [call[1:3] for call in calls] == [['profile', 'status'], ['snapshot', '--profile']]
 
 
 def test_browser_smoke_dry_run_json_does_not_call_managed_browser(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     def fake_run(args, **kwargs):  # pragma: no cover - should never be called
         raise AssertionError(args)
 

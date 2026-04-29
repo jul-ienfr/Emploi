@@ -19,7 +19,8 @@ class FakeRunner:
         return subprocess.CompletedProcess(args, self.returncode, stdout=self.stdout, stderr=self.stderr)
 
 
-def test_status_builds_default_command_and_parses_json():
+def test_status_builds_default_command_and_parses_json(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout=json.dumps({'ok': True, 'profile': 'emploi', 'site': 'france-travail'}))
     client = ManagedBrowserClient(runner=runner)
 
@@ -29,11 +30,12 @@ def test_status_builds_default_command_and_parses_json():
     assert result.payload['profile'] == 'emploi'
     assert runner.calls[0][0] == [
         'managed-browser',
+        'profile',
         'status',
-        '--site',
-        'france-travail',
         '--profile',
         'emploi',
+        '--site',
+        'france-travail',
         '--json',
     ]
     assert runner.calls[0][1]['capture_output'] is True
@@ -41,7 +43,8 @@ def test_status_builds_default_command_and_parses_json():
     assert runner.calls[0][1]['check'] is False
 
 
-def test_open_builds_command_with_url_and_custom_context():
+def test_open_builds_command_with_url_and_custom_context(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout=json.dumps({'ok': True, 'url': 'https://candidat.francetravail.fr'}))
     client = ManagedBrowserClient(command='mb', runner=runner)
 
@@ -50,18 +53,21 @@ def test_open_builds_command_with_url_and_custom_context():
     assert result.ok is True
     assert runner.calls[0][0] == [
         'mb',
-        'open',
-        '--site',
-        'custom-site',
+        'flow',
+        'run',
+        'open_url',
         '--profile',
         'custom-profile',
-        '--url',
-        'https://candidat.francetravail.fr',
+        '--site',
+        'custom-site',
+        '--param',
+        'url=https://candidat.francetravail.fr',
         '--json',
     ]
 
 
-def test_snapshot_and_checkpoint_command_construction():
+def test_snapshot_and_checkpoint_command_construction(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout=json.dumps({'ok': True, 'path': '/tmp/snapshot.json'}))
     client = ManagedBrowserClient(command='mb', runner=runner)
 
@@ -72,22 +78,21 @@ def test_snapshot_and_checkpoint_command_construction():
     assert runner.calls[0][0] == [
         'mb',
         'snapshot',
-        '--site',
-        'france-travail',
         '--profile',
         'emploi',
-        '--label',
-        'search-results',
+        '--site',
+        'france-travail',
         '--json',
     ]
     assert runner.calls[1][0] == [
         'mb',
+        'storage',
         'checkpoint',
-        '--site',
-        'france-travail',
         '--profile',
         'emploi',
-        '--name',
+        '--site',
+        'france-travail',
+        '--reason',
         'after-login',
         '--json',
     ]
@@ -102,7 +107,17 @@ def test_command_from_environment(monkeypatch):
     assert runner.calls[0][0][0] == 'custom-managed-browser'
 
 
-def test_unavailable_command_raises_clear_error():
+
+def test_command_from_environment_accepts_shell_like_node_script(monkeypatch):
+    runner = FakeRunner(stdout=json.dumps({'ok': True}))
+    monkeypatch.setenv('EMPLOI_MANAGED_BROWSER_COMMAND', 'node /opt/camofox/scripts/managed-browser.js')
+
+    ManagedBrowserClient(runner=runner).status()
+
+    assert runner.calls[0][0][:4] == ['node', '/opt/camofox/scripts/managed-browser.js', 'profile', 'status']
+
+def test_unavailable_command_raises_clear_error(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     def missing_runner(args, **kwargs):
         raise FileNotFoundError(args[0])
 
@@ -114,7 +129,8 @@ def test_unavailable_command_raises_clear_error():
     assert 'managed-browser' in str(excinfo.value)
 
 
-def test_nonzero_exit_raises_command_error():
+def test_nonzero_exit_raises_command_error(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout='', stderr='boom', returncode=2)
     client = ManagedBrowserClient(runner=runner)
 
@@ -125,7 +141,8 @@ def test_nonzero_exit_raises_command_error():
     assert excinfo.value.returncode == 2
 
 
-def test_invalid_json_raises_command_error():
+def test_invalid_json_raises_command_error(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout='not json')
     client = ManagedBrowserClient(runner=runner)
 

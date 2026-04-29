@@ -36,7 +36,7 @@ def test_doctor_json_reports_healthy_browser_when_status_probe_succeeds(tmp_path
     browser_command.write_text(
         "#!/usr/bin/env python3\n"
         "import json, sys\n"
-        "assert sys.argv[1:] == ['status', '--site', 'france-travail', '--profile', 'emploi', '--json']\n"
+        "assert sys.argv[1:] == ['profile', 'status', '--profile', 'emploi', '--site', 'france-travail', '--json']\n"
         "print(json.dumps({'ok': True, 'state': 'ready'}))\n"
     )
     browser_command.chmod(0o755)

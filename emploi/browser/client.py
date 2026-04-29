@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -17,6 +18,7 @@ class ManagedBrowserClient:
 
     def __init__(self, command: str | None = None, runner: Runner | None = None) -> None:
         self.command = command or os.environ.get("EMPLOI_MANAGED_BROWSER_COMMAND", "managed-browser")
+        self.command_parts = shlex.split(self.command)
         self.runner = runner or subprocess.run
 
     def status(self, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult:
@@ -29,7 +31,7 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("open", site=site, profile=profile, options=["--url", url])
+        return self._run("open", site=site, profile=profile, options=["--param", f"url={url}"])
 
     def snapshot(
         self,
@@ -38,10 +40,7 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        options: list[str] = []
-        if label:
-            options.extend(["--label", label])
-        return self._run("snapshot", site=site, profile=profile, options=options)
+        return self._run("snapshot", site=site, profile=profile)
 
     def checkpoint(
         self,
@@ -50,7 +49,7 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("checkpoint", site=site, profile=profile, options=["--name", name])
+        return self._run("checkpoint", site=site, profile=profile, options=["--reason", name])
 
     def _run(
         self,
@@ -61,20 +60,21 @@ class ManagedBrowserClient:
         options: Sequence[str] = (),
     ) -> BrowserCommandResult:
         args = [
-            self.command,
-            subcommand,
-            "--site",
-            site,
+            *self.command_parts,
+            *self._managed_browser_subcommand(subcommand),
             "--profile",
             profile,
+            "--site",
+            site,
             *options,
             "--json",
         ]
         try:
             completed = self.runner(args, capture_output=True, text=True, check=False)
         except FileNotFoundError as exc:
+            command = self.command_parts[0] if self.command_parts else self.command
             raise ManagedBrowserUnavailableError(
-                f"Managed Browser command not found: {self.command}. "
+                f"Managed Browser command not found: {command}. "
                 "Set EMPLOI_MANAGED_BROWSER_COMMAND or install the command."
             ) from exc
 
@@ -93,3 +93,12 @@ class ManagedBrowserClient:
         if not isinstance(payload, dict):
             raise ManagedBrowserCommandError("Invalid JSON from Managed Browser command: expected object")
         return BrowserCommandResult(command=subcommand, site=site, profile=profile, payload=payload)
+
+    def _managed_browser_subcommand(self, subcommand: str) -> list[str]:
+        if subcommand == "status":
+            return ["profile", "status"]
+        if subcommand == "open":
+            return ["flow", "run", "open_url"]
+        if subcommand == "checkpoint":
+            return ["storage", "checkpoint"]
+        return [subcommand]

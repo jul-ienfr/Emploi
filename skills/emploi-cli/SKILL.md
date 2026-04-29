@@ -173,8 +173,10 @@ emploi report
 
 ```bash
 export EMPLOI_DB=/chemin/vers/emploi.sqlite
-export EMPLOI_MANAGED_BROWSER_COMMAND=managed-browser
+export EMPLOI_MANAGED_BROWSER_COMMAND="node /home/jul/tools/camofox-browser/scripts/managed-browser.js"
 ```
+
+`emploi` parle le protocole du wrapper Camofox Managed Browser : `profile status`, `flow run open_url`, `snapshot`, `storage checkpoint`. `EMPLOI_MANAGED_BROWSER_COMMAND` peut donc contenir une commande avec arguments, pas seulement un binaire unique.
 
 ## Pièges connus
 

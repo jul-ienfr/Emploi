@@ -117,14 +117,15 @@ def test_run_saved_search_uses_france_travail_flow_and_updates_timestamp(tmp_pat
 
 
 def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     calls = []
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == "open":
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2]}), stderr="")
+        if args[1:4] == ["flow", "run", "open_url"]:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[-2].removeprefix("url=")}), stderr="")
         if args[1] == "snapshot":
             return subprocess.CompletedProcess(
                 args,
@@ -174,7 +175,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     assert "Annecy" in listed.stdout
     assert ran.exit_code == 0
     assert "1 offre" in ran.stdout
-    assert any(call[1] == "open" for call in calls)
+    assert any(call[1:4] == ["flow", "run", "open_url"] for call in calls)
 
 
 def test_search_profile_cli_enable_disable_toggle_existing_profile(tmp_path, monkeypatch):
