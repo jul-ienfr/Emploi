@@ -102,7 +102,7 @@ Les options booléennes globales permettent de couper proprement une surface du 
 ### Profils de recherche sauvegardés
 
 ```bash
-emploi search-profile add support-annecy --query "technicien support" --where "Annecy" --radius 20 --contract CDI
+emploi search-profile add support-annecy --query "technicien support" --where "Annecy" --radius 15 --contract CDI
 emploi search-profile add test-remote --query "python remote" --disabled
 emploi search-profile list
 emploi search-profile list --enabled
@@ -114,6 +114,8 @@ emploi search-profile run --all
 ```
 
 Chaque profil/option de recherche peut être activé ou désactivé par nom ou ID avec `enable`, `disable` ou `toggle`. `run --all` ne lance que les profils actifs; `list --enabled` filtre les profils désactivés.
+
+Si Julien demande un rayon qui n'existe pas exactement côté France Travail, le CLI stocke le rayon demandé et envoie l'option France Travail supérieure. Exemple : `--radius 15` devient `rayon=20` dans l'URL, et `search-profile list` affiche `20 (demandé 15)` pour que l'analyse garde le plafond réel de 15 km.
 
 Pour une routine de recherche, commencer par :
 

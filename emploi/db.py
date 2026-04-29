@@ -22,6 +22,7 @@ FEATURE_OPTIONS: dict[str, bool] = {
     "managed_browser.enabled": True,
     "scoring.enabled": True,
 }
+FRANCE_TRAVAIL_RADIUS_OPTIONS = (0, 5, 10, 20, 30, 50, 100)
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 
@@ -440,6 +441,15 @@ def list_offer_events(conn: sqlite3.Connection, offer_id: int) -> list[sqlite3.R
     )
 
 
+def france_travail_radius_for(requested_radius: int) -> int:
+    if requested_radius <= 0:
+        return 0
+    for option in FRANCE_TRAVAIL_RADIUS_OPTIONS:
+        if option >= requested_radius:
+            return option
+    return FRANCE_TRAVAIL_RADIUS_OPTIONS[-1]
+
+
 def add_saved_search(
     conn: sqlite3.Connection,
     *,
@@ -451,12 +461,14 @@ def add_saved_search(
     enabled: bool = True,
     notes: str = "",
 ) -> int:
+    requested_radius = max(0, int(radius))
+    france_travail_radius = france_travail_radius_for(requested_radius)
     cursor = conn.execute(
         """
-        INSERT INTO saved_searches (name, query, where_text, radius, contract, enabled, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO saved_searches (name, query, where_text, radius, requested_radius, contract, enabled, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, query, where_text, radius, contract, 1 if enabled else 0, notes),
+        (name, query, where_text, france_travail_radius, requested_radius, contract, 1 if enabled else 0, notes),
     )
     conn.commit()
     return int(cursor.lastrowid)

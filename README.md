@@ -107,7 +107,7 @@ Les options disponibles sont `managed_browser.enabled`, `france_travail.enabled`
 Profils de recherche sauvegardés :
 
 ```bash
-emploi search-profile add support-annecy --query "technicien support" --where "Annecy" --radius 20 --contract CDI
+emploi search-profile add support-annecy --query "technicien support" --where "Annecy" --radius 15 --contract CDI
 emploi search-profile add test-remote --query "python remote" --disabled
 emploi search-profile list
 emploi search-profile list --enabled
@@ -119,6 +119,8 @@ emploi search-profile run --all
 ```
 
 Chaque profil sauvegardé a un état actif/inactif. `enable`, `disable` et `toggle` permettent d'activer ou désactiver chaque option/profil existant par nom ou ID. `emploi search-profile run --all` exécute uniquement les profils actifs; `list --enabled` masque les profils désactivés.
+
+Pour les rayons France Travail non proposés exactement, le CLI conserve le rayon demandé et utilise l'option France Travail supérieure. Exemple: `--radius 15` est envoyé à France Travail avec `rayon=20`, puis `search-profile list` affiche `20 (demandé 15)` pour rappeler que l'analyse doit filtrer à 15 km effectifs.
 
 Candidatures et pilotage opérateur :
 

@@ -70,10 +70,12 @@ def _browser(browser: BrowserLike | None) -> BrowserLike:
     return browser or ManagedBrowserClient()
 
 
-def build_search_url(query: str, location: str = "") -> str:
-    params = {"motsCles": query}
+def build_search_url(query: str, location: str = "", radius: int = 0) -> str:
+    params: dict[str, object] = {"motsCles": query}
     if location:
         params["lieux"] = location
+    if radius > 0:
+        params["rayon"] = radius
     return f"{FT_SEARCH_URL}?{urlencode(params)}"
 
 
@@ -169,12 +171,13 @@ def search_offers(
     *,
     query: str,
     location: str = "",
+    radius: int = 0,
     browser: BrowserLike | None = None,
     site: str = DEFAULT_SITE,
     profile: str = DEFAULT_PROFILE,
 ) -> list[SearchImportResult]:
     client = _browser(browser)
-    url = build_search_url(query, location)
+    url = build_search_url(query, location, radius)
     client.open(url, site=site, profile=profile)
     snapshot = client.snapshot(label="ft-search", site=site, profile=profile)
     extracted = extract_offers(snapshot.payload)
@@ -198,6 +201,7 @@ def run_saved_search(
         conn,
         query=saved["query"],
         location=saved["where_text"],
+        radius=int(saved["radius"]),
         browser=browser,
         site=site,
         profile=profile,

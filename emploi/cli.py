@@ -125,6 +125,14 @@ def _print_option_state(option: dict[str, object]) -> None:
     console.print(f"Option {status} : {option['key']} = {option['value']}")
 
 
+def _format_search_radius(saved) -> str:
+    radius = int(saved["radius"] or 0)
+    requested = int(saved["requested_radius"] or 0) if "requested_radius" in saved.keys() else radius
+    if requested and requested != radius:
+        return f"{radius} (demandé {requested})"
+    return str(radius)
+
+
 @app.callback(invoke_without_command=True)
 def main(version: bool = typer.Option(False, "--version", help="Afficher la version")) -> None:
     if version:
@@ -748,7 +756,7 @@ def search_profile_list(enabled_only: bool = typer.Option(False, "--enabled")) -
             saved["name"],
             saved["query"],
             saved["where_text"],
-            str(saved["radius"]),
+            _format_search_radius(saved),
             saved["contract"],
             "oui" if saved["enabled"] else "non",
             saved["last_run_at"] or "jamais",

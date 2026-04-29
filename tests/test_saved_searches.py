@@ -54,7 +54,8 @@ def test_saved_search_helpers_roundtrip_and_last_run(tmp_path):
     assert saved["name"] == "support-annecy"
     assert saved["query"] == "technicien support"
     assert saved["where_text"] == "Annecy"
-    assert saved["radius"] == 15
+    assert saved["radius"] == 20
+    assert saved["requested_radius"] == 15
     assert saved["contract"] == "CDI"
     assert saved["enabled"] == 1
     assert saved["created_at"]
@@ -88,10 +89,10 @@ def test_set_saved_search_enabled_updates_by_name_or_id_and_errors(tmp_path):
         raise AssertionError("set_saved_search_enabled should reject missing profiles")
 
 
-def test_run_saved_search_uses_france_travail_flow_and_updates_timestamp(tmp_path):
+def test_run_saved_search_uses_france_travail_upper_radius_and_keeps_requested_radius(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    search_id = add_saved_search(conn, name="support", query="support", where_text="Annecy")
+    search_id = add_saved_search(conn, name="support", query="support", where_text="Annecy", radius=15)
     browser = FakeBrowser([
         {
             "cards": [
@@ -113,7 +114,11 @@ def test_run_saved_search_uses_france_travail_flow_and_updates_timestamp(tmp_pat
     assert results[0].title == "Technicien support"
     assert "motsCles=support" in browser.opened[0]
     assert "lieux=Annecy" in browser.opened[0]
-    assert get_saved_search(conn, search_id)["last_run_at"]
+    assert "rayon=20" in browser.opened[0]
+    saved = get_saved_search(conn, search_id)
+    assert saved["radius"] == 20
+    assert saved["requested_radius"] == 15
+    assert saved["last_run_at"]
 
 
 def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
@@ -160,7 +165,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
             "--where",
             "Annecy",
             "--radius",
-            "20",
+            "15",
             "--contract",
             "CDI",
         ],
@@ -173,6 +178,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     assert listed.exit_code == 0
     assert "support" in listed.stdout
     assert "Annecy" in listed.stdout
+    assert "20 (demandé 15)" in listed.stdout
     assert ran.exit_code == 0
     assert "1 offre" in ran.stdout
     assert any(call[1] == "navigate" for call in calls)

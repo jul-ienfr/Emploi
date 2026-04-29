@@ -79,6 +79,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    _add_column_if_missing(conn, "saved_searches", "requested_radius", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing(conn, "saved_searches", "notes", "TEXT NOT NULL DEFAULT ''")
     _add_column_if_missing(conn, "applications", "draft_path", "TEXT NOT NULL DEFAULT ''")
     conn.commit()
