@@ -4,6 +4,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from emploi.doctor import build_doctor_report
+
 from emploi import __version__
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserError
@@ -71,6 +73,31 @@ def init() -> None:
     with connect(path) as conn:
         init_db(conn)
     console.print(f"Base initialisée : {path}")
+
+
+@app.command()
+def doctor(json_output: bool = typer.Option(False, "--json", help="Afficher un diagnostic JSON parseable")) -> None:
+    """Diagnostique l'état local du CLI, de SQLite et du Managed Browser."""
+    report = build_doctor_report()
+    if json_output:
+        console.print_json(data=report)
+        return
+
+    console.print(f"Diagnostic Emploi — {report['status']}")
+    console.print(f"Version       : {report['version']}")
+    database = report["database"]
+    console.print(f"Base SQLite   : {database['status']} — {database['path']}")
+    if database["status"] == "ok":
+        console.print(f"Offres        : {database['offers']}")
+        console.print(f"Candidatures  : {database['applications']}")
+    browser = report["managed_browser"]
+    console.print(f"Managed Browser : {browser['status']} — {browser['command']}")
+    if browser.get("error"):
+        console.print(f"Erreur        : {browser['error']}")
+    if report["recommended_actions"]:
+        console.print("Actions recommandées :")
+        for action in report["recommended_actions"]:
+            console.print(f"- {action}")
 
 
 @offer_app.command("add")

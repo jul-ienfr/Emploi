@@ -39,10 +39,12 @@ La commande Managed Browser doit accepter les sous-commandes utilisées par `emp
 
 ## Commandes V1
 
-Initialisation et offres locales :
+Initialisation, diagnostic et offres locales :
 
 ```bash
 emploi init
+emploi doctor
+emploi doctor --json
 emploi offer add --title "Technicien support" --company "Entreprise X" --location "Bonneville"
 emploi offer list
 emploi offer show 1
