@@ -92,6 +92,18 @@ Sources/adapters prévus pour les évolutions futures :
 - `local-site` — import depuis sites locaux/régionaux ou pages entreprises converties en JSON/CSV.
 - `remote-freelance` — import depuis sources remote/freelance converties en JSON/CSV.
 
+Options opérateur globales :
+
+```bash
+emploi option list
+emploi option get france_travail.enabled
+emploi option disable france_travail.enabled
+emploi option enable france_travail.enabled
+emploi option toggle drafts.enabled
+```
+
+Les options disponibles sont `managed_browser.enabled`, `france_travail.enabled`, `import.enabled`, `drafts.enabled`, `brief.enabled` et `scoring.enabled`. Les valeurs par défaut sont actives pour rester rétrocompatibles. Quand une option est désactivée, la commande concernée s'arrête proprement avant l'action externe/écriture sensible; les sorties `--json` restent parseables.
+
 Profils de recherche sauvegardés :
 
 ```bash

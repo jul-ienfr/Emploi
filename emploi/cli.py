@@ -15,21 +15,28 @@ from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandR
 from emploi.db import (
     add_application,
     add_offer,
+    FEATURE_OPTIONS,
     add_saved_search,
     application_summary,
     connect,
     db_path,
+    get_boolean_option,
     get_offer,
+    validate_option_key,
+    get_option,
     get_saved_search,
     init_db,
     install_default_julien_search_profiles,
     list_applications,
     list_next_actions,
     list_offers,
+    list_options,
     list_saved_searches,
     rescore_offer,
     schedule_application_followup,
+    set_boolean_option,
     set_saved_search_enabled,
+    toggle_boolean_option,
     update_application_status,
     update_offer_status,
 )
@@ -52,12 +59,14 @@ browser_app = typer.Typer(help="Commandes Managed Browser")
 ft_app = typer.Typer(help="Flux France Travail via Managed Browser")
 search_profile_app = typer.Typer(help="Profils de recherche sauvegardés")
 import_app = typer.Typer(help="Imports génériques sans scraping")
+option_app = typer.Typer(help="Options opérateur activables/désactivables")
 app.add_typer(offer_app, name="offer")
 app.add_typer(application_app, name="application")
 app.add_typer(browser_app, name="browser")
 app.add_typer(ft_app, name="ft")
 app.add_typer(search_profile_app, name="search-profile")
 app.add_typer(import_app, name="import")
+app.add_typer(option_app, name="option")
 console = Console(soft_wrap=True)
 
 
@@ -76,6 +85,44 @@ def _print_json_or_text(payload: dict, *, json_output: bool, text: str) -> None:
 def _handle_browser_error(error: ManagedBrowserError) -> None:
     console.print(f"[red]{error}[/red]")
     raise typer.Exit(1)
+
+
+def _option_disabled_payload(key: str) -> dict[str, str]:
+    return {"status": "disabled", "option": key, "message": f"Option désactivée: {key}"}
+
+
+def _option_is_enabled_without_creating_db(key: str) -> bool:
+    normalized = validate_option_key(key)
+    path = db_path()
+    if not path.exists():
+        return FEATURE_OPTIONS[normalized]
+    with connect(path) as conn:
+        init_db(conn)
+        return get_boolean_option(conn, normalized)
+
+
+def _ensure_option_enabled(key: str, *, json_output: bool = False) -> None:
+    try:
+        enabled = _option_is_enabled_without_creating_db(key)
+    except ValueError as error:
+        if json_output:
+            console.print_json(data={"status": "error", "option": key, "message": str(error)})
+        else:
+            console.print(str(error))
+        raise typer.Exit(1) from error
+    if enabled:
+        return
+    payload = _option_disabled_payload(key)
+    if json_output:
+        console.print_json(data=payload)
+    else:
+        console.print(f"[red]{payload['message']}[/red]")
+    raise typer.Exit(1)
+
+
+def _print_option_state(option: dict[str, object]) -> None:
+    status = "activée" if option["enabled"] else "désactivée"
+    console.print(f"Option {status} : {option['key']} = {option['value']}")
 
 
 @app.callback(invoke_without_command=True)
@@ -117,6 +164,74 @@ def doctor(json_output: bool = typer.Option(False, "--json", help="Afficher un d
         console.print("Actions recommandées :")
         for action in report["recommended_actions"]:
             console.print(f"- {action}")
+
+
+@option_app.command("list")
+def option_list() -> None:
+    """Liste les options opérateur et leur état."""
+    with connect() as conn:
+        init_db(conn)
+        options = list_options(conn)
+    table = Table("Clé", "Active", "Valeur", "Source", "Défaut", "MAJ")
+    for option in options:
+        table.add_row(
+            str(option["key"]),
+            "oui" if option["enabled"] else "non",
+            str(option["value"]),
+            str(option["source"]),
+            "oui" if option["default"] else "non",
+            str(option["updated_at"]),
+        )
+    console.print(table)
+
+
+@option_app.command("get")
+def option_get(key: str) -> None:
+    """Affiche une option opérateur."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            option = get_option(conn, key)
+    except ValueError as error:
+        console.print(str(error))
+        raise typer.Exit(1) from error
+    _print_option_state(option)
+
+
+def _set_option_enabled(key: str, enabled: bool) -> None:
+    try:
+        with connect() as conn:
+            init_db(conn)
+            option = set_boolean_option(conn, key, enabled)
+    except ValueError as error:
+        console.print(str(error))
+        raise typer.Exit(1) from error
+    _print_option_state(option)
+
+
+@option_app.command("enable")
+def option_enable(key: str) -> None:
+    """Active une option opérateur."""
+    _set_option_enabled(key, True)
+
+
+@option_app.command("disable")
+def option_disable(key: str) -> None:
+    """Désactive une option opérateur."""
+    _set_option_enabled(key, False)
+
+
+@option_app.command("toggle")
+def option_toggle(key: str) -> None:
+    """Inverse une option opérateur."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            option = toggle_boolean_option(conn, key)
+    except ValueError as error:
+        console.print(str(error))
+        raise typer.Exit(1) from error
+    _print_option_state(option)
 
 
 @offer_app.command("add")
@@ -203,6 +318,7 @@ def offer_show(offer_id: int) -> None:
 @offer_app.command("score")
 def offer_score(offer_id: int | None = typer.Argument(None), all_offers: bool = typer.Option(False, "--all")) -> None:
     """Recalcule le score d'une offre ou de toutes les offres."""
+    _ensure_option_enabled("scoring.enabled")
     with connect() as conn:
         init_db(conn)
         if all_offers:
@@ -262,6 +378,7 @@ def import_offers(
     json_output: bool = typer.Option(False, "--json", help="Afficher un résumé JSON parseable"),
 ) -> None:
     """Importe des offres JSON/CSV locales sans scraper de site web."""
+    _ensure_option_enabled("import.enabled", json_output=json_output)
     try:
         with connect() as conn:
             init_db(conn)
@@ -289,6 +406,7 @@ def browser_status(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Affiche l'état du Managed Browser."""
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         _print_browser_result(ManagedBrowserClient().status(site=site, profile=profile))
     except ManagedBrowserError as error:
@@ -302,6 +420,7 @@ def browser_open(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Ouvre une URL dans le Managed Browser."""
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         _print_browser_result(ManagedBrowserClient().open(url, site=site, profile=profile))
     except ManagedBrowserError as error:
@@ -315,6 +434,7 @@ def browser_snapshot(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Capture un snapshot depuis le Managed Browser."""
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         _print_browser_result(ManagedBrowserClient().snapshot(label=label, site=site, profile=profile))
     except ManagedBrowserError as error:
@@ -328,6 +448,7 @@ def browser_checkpoint(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Enregistre un checkpoint nommé dans le Managed Browser."""
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         _print_browser_result(ManagedBrowserClient().checkpoint(name, site=site, profile=profile))
     except ManagedBrowserError as error:
@@ -342,6 +463,7 @@ def browser_smoke(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Vérifie le câblage Managed Browser sans soumettre de candidature."""
+    _ensure_option_enabled("managed_browser.enabled", json_output=json_output)
     if dry_run:
         payload = {
             "status": "dry-run",
@@ -382,6 +504,8 @@ def ft_smoke(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Vérifie le flux France Travail sans import en base ni soumission."""
+    _ensure_option_enabled("france_travail.enabled", json_output=json_output)
+    _ensure_option_enabled("managed_browser.enabled", json_output=json_output)
     search_url = build_search_url(query, location)
     base_payload = {
         "query": query,
@@ -424,6 +548,8 @@ def ft_search(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Recherche France Travail via Managed Browser et importe les offres."""
+    _ensure_option_enabled("france_travail.enabled")
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         with connect() as conn:
             init_db(conn)
@@ -453,6 +579,8 @@ def ft_refresh(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Rafraîchit l'état d'une offre France Travail stockée."""
+    _ensure_option_enabled("france_travail.enabled")
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         with connect() as conn:
             init_db(conn)
@@ -476,6 +604,11 @@ def ft_apply(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Vérifie, prépare ou ouvre une candidature France Travail; ne soumet jamais automatiquement."""
+    _ensure_option_enabled("france_travail.enabled")
+    if draft:
+        _ensure_option_enabled("drafts.enabled")
+    if check or open_browser or not any((check, draft, open_browser)):
+        _ensure_option_enabled("managed_browser.enabled")
     if not any((check, draft, open_browser)):
         check = True
     try:
@@ -632,6 +765,8 @@ def search_profile_run(
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Exécute un profil de recherche via France Travail."""
+    _ensure_option_enabled("france_travail.enabled")
+    _ensure_option_enabled("managed_browser.enabled")
     try:
         with connect() as conn:
             init_db(conn)
@@ -689,6 +824,7 @@ def application_draft(
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
 ) -> None:
     """Crée un brouillon local court en français, sans soumission."""
+    _ensure_option_enabled("drafts.enabled")
     try:
         with connect() as conn:
             init_db(conn)
@@ -812,6 +948,7 @@ def brief(
     today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
 ) -> None:
     """Affiche le brief quotidien Julien: offres, actions, relances, blockers et stats."""
+    _ensure_option_enabled("brief.enabled", json_output=json_output)
     with connect() as conn:
         init_db(conn)
         payload = build_brief(conn, today=today)

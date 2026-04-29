@@ -87,6 +87,18 @@ emploi ft apply 1 --open
 
 Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` pour vérifier, `--draft` pour préparer, `--open` pour ouvrir dans le navigateur managé.
 
+### Options opérateur globales
+
+```bash
+emploi option list
+emploi option get france_travail.enabled
+emploi option disable france_travail.enabled
+emploi option enable france_travail.enabled
+emploi option toggle drafts.enabled
+```
+
+Les options booléennes globales permettent de couper proprement une surface du workflow avant action externe ou écriture sensible : `managed_browser.enabled`, `france_travail.enabled`, `import.enabled`, `drafts.enabled`, `brief.enabled`, `scoring.enabled`. Elles sont actives par défaut. Respecter ces toggles avant de lancer recherche FT, imports, brouillons, brief ou recalcul de score.
+
 ### Profils de recherche sauvegardés
 
 ```bash

@@ -14,6 +14,16 @@ DEFAULT_DB_PATH = Path.home() / ".local" / "share" / "emploi" / "emploi.sqlite"
 APPLICATION_STATUSES = frozenset(
     {"analyzed", "interesting", "draft", "sent", "followup", "response", "rejected", "interview"}
 )
+FEATURE_OPTIONS: dict[str, bool] = {
+    "brief.enabled": True,
+    "drafts.enabled": True,
+    "france_travail.enabled": True,
+    "import.enabled": True,
+    "managed_browser.enabled": True,
+    "scoring.enabled": True,
+}
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 
 
 def db_path() -> Path:
@@ -65,6 +75,76 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     migrate(conn)
     conn.commit()
+
+
+def validate_option_key(key: str) -> str:
+    normalized = key.strip().lower()
+    if normalized not in FEATURE_OPTIONS:
+        allowed = ", ".join(sorted(FEATURE_OPTIONS))
+        raise ValueError(f"Option inconnue: {key}. Options autorisées: {allowed}")
+    return normalized
+
+
+def _parse_boolean_option(key: str, value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ValueError(f"Valeur booléenne invalide pour {key}: {value}")
+
+
+def get_option(conn: sqlite3.Connection, key: str) -> dict[str, object]:
+    normalized = validate_option_key(key)
+    row = conn.execute("SELECT key, value, updated_at FROM settings WHERE key = ?", (normalized,)).fetchone()
+    if row is None:
+        enabled = FEATURE_OPTIONS[normalized]
+        return {
+            "key": normalized,
+            "value": "true" if enabled else "false",
+            "enabled": enabled,
+            "default": FEATURE_OPTIONS[normalized],
+            "source": "default",
+            "updated_at": "",
+        }
+    enabled = _parse_boolean_option(normalized, str(row["value"]))
+    return {
+        "key": normalized,
+        "value": "true" if enabled else "false",
+        "enabled": enabled,
+        "default": FEATURE_OPTIONS[normalized],
+        "source": "stored",
+        "updated_at": row["updated_at"],
+    }
+
+
+def list_options(conn: sqlite3.Connection) -> list[dict[str, object]]:
+    return [get_option(conn, key) for key in sorted(FEATURE_OPTIONS)]
+
+
+def get_boolean_option(conn: sqlite3.Connection, key: str) -> bool:
+    return bool(get_option(conn, key)["enabled"])
+
+
+def set_boolean_option(conn: sqlite3.Connection, key: str, enabled: bool) -> dict[str, object]:
+    normalized = validate_option_key(key)
+    conn.execute(
+        """
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (normalized, "true" if enabled else "false"),
+    )
+    conn.commit()
+    return get_option(conn, normalized)
+
+
+def toggle_boolean_option(conn: sqlite3.Connection, key: str) -> dict[str, object]:
+    normalized = validate_option_key(key)
+    return set_boolean_option(conn, normalized, not get_boolean_option(conn, normalized))
 
 
 def add_offer(
