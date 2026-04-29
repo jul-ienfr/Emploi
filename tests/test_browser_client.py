@@ -43,7 +43,7 @@ def test_status_builds_default_command_and_parses_json(monkeypatch):
     assert runner.calls[0][1]['check'] is False
 
 
-def test_open_builds_command_with_url_and_custom_context(monkeypatch):
+def test_open_uses_navigate_command_with_url_and_custom_context(monkeypatch):
     monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout=json.dumps({'ok': True, 'url': 'https://candidat.francetravail.fr'}))
     client = ManagedBrowserClient(command='mb', runner=runner)
@@ -53,15 +53,13 @@ def test_open_builds_command_with_url_and_custom_context(monkeypatch):
     assert result.ok is True
     assert runner.calls[0][0] == [
         'mb',
-        'flow',
-        'run',
-        'open_url',
+        'navigate',
         '--profile',
         'custom-profile',
         '--site',
         'custom-site',
-        '--param',
-        'url=https://candidat.francetravail.fr',
+        '--url',
+        'https://candidat.francetravail.fr',
         '--json',
     ]
 

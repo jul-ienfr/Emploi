@@ -31,7 +31,7 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("open", site=site, profile=profile, options=["--param", f"url={url}"])
+        return self._run("open", site=site, profile=profile, options=["--url", url])
 
     def snapshot(
         self,
@@ -98,7 +98,7 @@ class ManagedBrowserClient:
         if subcommand == "status":
             return ["profile", "status"]
         if subcommand == "open":
-            return ["flow", "run", "open_url"]
+            return ["navigate"]
         if subcommand == "checkpoint":
             return ["storage", "checkpoint"]
         return [subcommand]

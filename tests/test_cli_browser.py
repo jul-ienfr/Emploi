@@ -60,15 +60,13 @@ def test_browser_open_accepts_url_and_profile_options(monkeypatch):
     assert result.exit_code == 0
     assert seen['args'] == [
         'managed-browser',
-        'flow',
-        'run',
-        'open_url',
+        'navigate',
         '--profile',
         'custom-profile',
         '--site',
         'custom-site',
-        '--param',
-        'url=https://example.test',
+        '--url',
+        'https://example.test',
         '--json',
     ]
     assert 'https://example.test' in result.stdout
