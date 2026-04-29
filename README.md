@@ -94,6 +94,12 @@ emploi report
 
 `emploi next` propose les prochaines actions utiles à partir des offres France Travail actives à fort score et des candidatures en brouillon/envoyées. `emploi report` inclut le résumé local historique plus des compteurs France Travail/browser-backed (offres FT, offres FT actives, brouillons, candidatures envoyées).
 
+## Skill Hermes
+
+Le dépôt embarque une skill Hermes dédiée : `skills/emploi-cli/SKILL.md`.
+
+Elle décrit le workflow agent pour utiliser `emploi` correctement : diagnostic `emploi doctor --json`, recherches France Travail via Managed Browser, profils sauvegardés, commandes de suivi et règle de sécurité sur les candidatures assistées.
+
 ## Notes
 
 - `emploi ft apply` ne soumet jamais automatiquement une candidature : il vérifie, prépare un brouillon local ou ouvre l'offre dans le navigateur managé.
