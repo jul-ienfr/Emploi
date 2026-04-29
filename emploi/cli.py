@@ -59,7 +59,7 @@ def _handle_browser_error(error: ManagedBrowserError) -> None:
     raise typer.Exit(1)
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(version: bool = typer.Option(False, "--version", help="Afficher la version")) -> None:
     if version:
         console.print(__version__)
