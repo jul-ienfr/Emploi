@@ -91,10 +91,17 @@ Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` 
 
 ```bash
 emploi search-profile add support-annecy --query "technicien support" --where "Annecy" --radius 20 --contract CDI
+emploi search-profile add test-remote --query "python remote" --disabled
 emploi search-profile list
+emploi search-profile list --enabled
+emploi search-profile enable support-annecy
+emploi search-profile disable support-annecy
+emploi search-profile toggle support-annecy
 emploi search-profile run support-annecy
 emploi search-profile run --all
 ```
+
+Chaque profil/option de recherche peut être activé ou désactivé par nom ou ID avec `enable`, `disable` ou `toggle`. `run --all` ne lance que les profils actifs; `list --enabled` filtre les profils désactivés.
 
 Pour une routine de recherche, commencer par :
 

@@ -96,10 +96,17 @@ Profils de recherche sauvegardés :
 
 ```bash
 emploi search-profile add support-annecy --query "technicien support" --where "Annecy" --radius 20 --contract CDI
+emploi search-profile add test-remote --query "python remote" --disabled
 emploi search-profile list
+emploi search-profile list --enabled
+emploi search-profile enable support-annecy
+emploi search-profile disable support-annecy
+emploi search-profile toggle support-annecy
 emploi search-profile run support-annecy
 emploi search-profile run --all
 ```
+
+Chaque profil sauvegardé a un état actif/inactif. `enable`, `disable` et `toggle` permettent d'activer ou désactiver chaque option/profil existant par nom ou ID. `emploi search-profile run --all` exécute uniquement les profils actifs; `list --enabled` masque les profils désactivés.
 
 Candidatures et pilotage opérateur :
 

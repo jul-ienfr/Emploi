@@ -14,6 +14,7 @@ from emploi.db import (
     get_saved_search,
     init_db,
     list_saved_searches,
+    set_saved_search_enabled,
     update_saved_search_last_run,
 )
 from emploi.france_travail.flows import run_saved_search
@@ -62,6 +63,29 @@ def test_saved_search_helpers_roundtrip_and_last_run(tmp_path):
     update_saved_search_last_run(conn, search_id, "2026-04-29T12:00:00+00:00")
     assert get_saved_search(conn, search_id)["last_run_at"] == "2026-04-29T12:00:00+00:00"
     assert [row["name"] for row in list_saved_searches(conn)] == ["support-annecy"]
+
+
+def test_set_saved_search_enabled_updates_by_name_or_id_and_errors(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    search_id = add_saved_search(conn, name="support-annecy", query="support", where_text="Annecy")
+
+    disabled = set_saved_search_enabled(conn, "support-annecy", False)
+    assert disabled["id"] == search_id
+    assert disabled["name"] == "support-annecy"
+    assert disabled["enabled"] == 0
+    assert get_saved_search(conn, search_id)["enabled"] == 0
+
+    enabled = set_saved_search_enabled(conn, search_id, True)
+    assert enabled["id"] == search_id
+    assert enabled["enabled"] == 1
+
+    try:
+        set_saved_search_enabled(conn, "absent", False)
+    except ValueError as error:
+        assert "Profil de recherche introuvable: absent" in str(error)
+    else:
+        raise AssertionError("set_saved_search_enabled should reject missing profiles")
 
 
 def test_run_saved_search_uses_france_travail_flow_and_updates_timestamp(tmp_path):
@@ -151,6 +175,58 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     assert ran.exit_code == 0
     assert "1 offre" in ran.stdout
     assert any(call[1] == "open" for call in calls)
+
+
+def test_search_profile_cli_enable_disable_toggle_existing_profile(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+
+    added = runner.invoke(
+        app,
+        ["search-profile", "add", "support", "--query", "support", "--where", "Annecy", "--disabled"],
+    )
+    enabled = runner.invoke(app, ["search-profile", "enable", "support"])
+    disabled = runner.invoke(app, ["search-profile", "disable", "support"])
+    toggled = runner.invoke(app, ["search-profile", "toggle", "support"])
+    missing = runner.invoke(app, ["search-profile", "enable", "absent"])
+
+    assert added.exit_code == 0
+    assert enabled.exit_code == 0
+    assert "Profil de recherche activé" in enabled.stdout
+    assert "support" in enabled.stdout
+    assert disabled.exit_code == 0
+    assert "Profil de recherche désactivé" in disabled.stdout
+    assert toggled.exit_code == 0
+    assert "Profil de recherche activé" in toggled.stdout
+    assert missing.exit_code != 0
+    assert "Profil de recherche introuvable: absent" in missing.output
+
+    with connect(db_path) as conn:
+        init_db(conn)
+        assert get_saved_search(conn, "support")["enabled"] == 1
+
+
+def test_search_profile_run_all_skips_disabled_profiles(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    with connect(db_path) as conn:
+        init_db(conn)
+        active_id = add_saved_search(conn, name="active", query="support", where_text="Annecy")
+        disabled_id = add_saved_search(conn, name="disabled", query="python", where_text="Lyon", enabled=False)
+    seen = []
+
+    def fake_run_saved_search(conn, search_id_or_name, *, site="france-travail", profile="emploi"):
+        seen.append(search_id_or_name)
+        return []
+
+    monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
+
+    ran = runner.invoke(app, ["search-profile", "run", "--all"])
+
+    assert ran.exit_code == 0
+    assert "1 profil(s) actif(s)" in ran.stdout
+    assert seen == [active_id]
+    assert disabled_id not in seen
 
 
 def test_install_default_julien_search_profiles_is_idempotent_and_contextual(tmp_path):

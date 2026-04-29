@@ -461,6 +461,24 @@ def get_saved_search(conn: sqlite3.Connection, search_id_or_name: int | str) -> 
     return conn.execute("SELECT * FROM saved_searches WHERE name = ?", (str(search_id_or_name),)).fetchone()
 
 
+def set_saved_search_enabled(
+    conn: sqlite3.Connection,
+    search_id_or_name: int | str,
+    enabled: bool,
+) -> sqlite3.Row:
+    saved = get_saved_search(conn, search_id_or_name)
+    if saved is None:
+        raise ValueError(f"Profil de recherche introuvable: {search_id_or_name}")
+    conn.execute(
+        "UPDATE saved_searches SET enabled = ? WHERE id = ?",
+        (1 if enabled else 0, int(saved["id"])),
+    )
+    conn.commit()
+    updated = get_saved_search(conn, int(saved["id"]))
+    assert updated is not None
+    return updated
+
+
 def update_saved_search_last_run(
     conn: sqlite3.Connection,
     search_id: int,

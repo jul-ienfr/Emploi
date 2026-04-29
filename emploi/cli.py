@@ -20,6 +20,7 @@ from emploi.db import (
     connect,
     db_path,
     get_offer,
+    get_saved_search,
     init_db,
     install_default_julien_search_profiles,
     list_applications,
@@ -28,6 +29,7 @@ from emploi.db import (
     list_saved_searches,
     rescore_offer,
     schedule_application_followup,
+    set_saved_search_enabled,
     update_application_status,
     update_offer_status,
 )
@@ -543,6 +545,45 @@ def search_profile_install_julien_defaults() -> None:
         row = rows_by_name[str(item["name"])]
         table.add_row("ignoré", str(item["id"]), str(item["name"]), row["where_text"])
     console.print(table)
+
+
+def _set_search_profile_enabled(name_or_id: str, enabled: bool) -> None:
+    try:
+        with connect() as conn:
+            init_db(conn)
+            saved = set_saved_search_enabled(conn, name_or_id, enabled)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    status = "activé" if saved["enabled"] else "désactivé"
+    console.print(f"Profil de recherche {status} #{saved['id']} — {saved['name']}")
+
+
+@search_profile_app.command("enable")
+def search_profile_enable(name_or_id: str) -> None:
+    """Active un profil de recherche sauvegardé."""
+    _set_search_profile_enabled(name_or_id, True)
+
+
+@search_profile_app.command("disable")
+def search_profile_disable(name_or_id: str) -> None:
+    """Désactive un profil de recherche sauvegardé."""
+    _set_search_profile_enabled(name_or_id, False)
+
+
+@search_profile_app.command("toggle")
+def search_profile_toggle(name_or_id: str) -> None:
+    """Inverse l'état actif/inactif d'un profil de recherche sauvegardé."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            current = get_saved_search(conn, name_or_id)
+            if current is None:
+                raise ValueError(f"Profil de recherche introuvable: {name_or_id}")
+            saved = set_saved_search_enabled(conn, int(current["id"]), not bool(current["enabled"]))
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    status = "activé" if saved["enabled"] else "désactivé"
+    console.print(f"Profil de recherche {status} #{saved['id']} — {saved['name']}")
 
 
 @search_profile_app.command("list")
