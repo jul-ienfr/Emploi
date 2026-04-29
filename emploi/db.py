@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
+from emploi.migrations import migrate
 from emploi.scoring import score_offer
 
 
@@ -57,6 +58,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    migrate(conn)
     conn.commit()
 
 
@@ -73,6 +75,15 @@ def add_offer(
     remote: str = "",
     contract_type: str = "",
     notes: str = "",
+    external_source: str = "",
+    external_id: str = "",
+    browser_url: str = "",
+    apply_url: str = "",
+    is_active: bool = True,
+    last_seen_at: str = "",
+    last_refreshed_at: str = "",
+    raw_browser_snapshot: str = "",
+    raw_extracted_text: str = "",
 ) -> int:
     scored = score_offer(
         {
@@ -87,8 +98,10 @@ def add_offer(
         """
         INSERT INTO offers (
             title, company, location, url, source, description, salary, remote,
-            contract_type, score, score_reasons, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            contract_type, score, score_reasons, notes, external_source,
+            external_id, browser_url, apply_url, is_active, last_seen_at,
+            last_refreshed_at, raw_browser_snapshot, raw_extracted_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             title,
@@ -103,6 +116,15 @@ def add_offer(
             scored.score,
             "\n".join(scored.reasons),
             notes,
+            external_source,
+            external_id,
+            browser_url,
+            apply_url,
+            1 if is_active else 0,
+            last_seen_at,
+            last_refreshed_at,
+            raw_browser_snapshot,
+            raw_extracted_text,
         ),
     )
     conn.commit()
@@ -178,6 +200,186 @@ def add_application(
     return int(cursor.lastrowid)
 
 
+def record_browser_session(
+    conn: sqlite3.Connection,
+    *,
+    site: str,
+    profile: str,
+    status: str = "",
+    current_url: str = "",
+    last_snapshot_label: str = "",
+    raw_status_json: str = "",
+) -> int:
+    cursor = conn.execute(
+        """
+        INSERT INTO browser_sessions (
+            site, profile, status, current_url, last_snapshot_label, raw_status_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(site, profile) DO UPDATE SET
+            status = excluded.status,
+            current_url = excluded.current_url,
+            last_snapshot_label = excluded.last_snapshot_label,
+            raw_status_json = excluded.raw_status_json,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING id
+        """,
+        (site, profile, status, current_url, last_snapshot_label, raw_status_json),
+    )
+    session_id = int(cursor.fetchone()["id"])
+    conn.commit()
+    return session_id
+
+
+def get_browser_session(
+    conn: sqlite3.Connection,
+    *,
+    site: str,
+    profile: str,
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM browser_sessions WHERE site = ? AND profile = ?",
+        (site, profile),
+    ).fetchone()
+
+
+def add_offer_event(
+    conn: sqlite3.Connection,
+    offer_id: int,
+    *,
+    event_type: str,
+    message: str = "",
+    payload_json: str = "",
+) -> int:
+    if get_offer(conn, offer_id) is None:
+        raise ValueError(f"Offre introuvable: {offer_id}")
+    cursor = conn.execute(
+        """
+        INSERT INTO offer_events (offer_id, event_type, message, payload_json)
+        VALUES (?, ?, ?, ?)
+        """,
+        (offer_id, event_type, message, payload_json),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def list_offer_events(conn: sqlite3.Connection, offer_id: int) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT * FROM offer_events
+            WHERE offer_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (offer_id,),
+        ).fetchall()
+    )
+
+
+def add_saved_search(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    query: str,
+    where_text: str = "",
+    radius: int = 0,
+    contract: str = "",
+    enabled: bool = True,
+) -> int:
+    cursor = conn.execute(
+        """
+        INSERT INTO saved_searches (name, query, where_text, radius, contract, enabled)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (name, query, where_text, radius, contract, 1 if enabled else 0),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def list_saved_searches(conn: sqlite3.Connection, *, enabled: bool | None = None) -> list[sqlite3.Row]:
+    if enabled is None:
+        return list(conn.execute("SELECT * FROM saved_searches ORDER BY name").fetchall())
+    return list(
+        conn.execute(
+            "SELECT * FROM saved_searches WHERE enabled = ? ORDER BY name",
+            (1 if enabled else 0,),
+        ).fetchall()
+    )
+
+
+def get_saved_search(conn: sqlite3.Connection, search_id_or_name: int | str) -> sqlite3.Row | None:
+    if isinstance(search_id_or_name, int) or str(search_id_or_name).isdigit():
+        row = conn.execute("SELECT * FROM saved_searches WHERE id = ?", (int(search_id_or_name),)).fetchone()
+        if row is not None:
+            return row
+    return conn.execute("SELECT * FROM saved_searches WHERE name = ?", (str(search_id_or_name),)).fetchone()
+
+
+def update_saved_search_last_run(
+    conn: sqlite3.Connection,
+    search_id: int,
+    timestamp: str | None = None,
+) -> None:
+    if timestamp is None:
+        conn.execute("UPDATE saved_searches SET last_run_at = CURRENT_TIMESTAMP WHERE id = ?", (search_id,))
+    else:
+        conn.execute("UPDATE saved_searches SET last_run_at = ? WHERE id = ?", (timestamp, search_id))
+    conn.commit()
+
+
+def list_next_actions(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict[str, object]]:
+    actions: list[dict[str, object]] = []
+    draft_rows = conn.execute(
+        """
+        SELECT applications.id AS application_id, offers.id AS offer_id, offers.title, offers.company, offers.score
+        FROM applications
+        JOIN offers ON offers.id = applications.offer_id
+        WHERE applications.status = 'draft'
+        ORDER BY offers.score DESC, applications.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    for row in draft_rows:
+        actions.append(
+            {
+                "action": "Finaliser brouillon",
+                "offer_id": row["offer_id"],
+                "title": row["title"],
+                "company": row["company"],
+                "score": row["score"],
+            }
+        )
+
+    remaining = max(0, limit - len(actions))
+    if remaining:
+        offer_rows = conn.execute(
+            """
+            SELECT * FROM offers
+            WHERE external_source = 'france-travail'
+              AND is_active = 1
+              AND score >= 70
+              AND status NOT IN ('applied', 'draft', 'rejected', 'archived')
+              AND id NOT IN (SELECT offer_id FROM applications)
+            ORDER BY score DESC, id DESC
+            LIMIT ?
+            """,
+            (remaining,),
+        ).fetchall()
+        for row in offer_rows:
+            actions.append(
+                {
+                    "action": "Vérifier/candidater FT",
+                    "offer_id": row["id"],
+                    "title": row["title"],
+                    "company": row["company"],
+                    "score": row["score"],
+                }
+            )
+    return actions
+
+
 def list_applications(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
@@ -197,10 +399,20 @@ def application_summary(conn: sqlite3.Connection) -> dict[str, int]:
     applied = conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0]
     rejected = conn.execute("SELECT COUNT(*) FROM offers WHERE status = 'rejected'").fetchone()[0]
     followup = conn.execute("SELECT COUNT(*) FROM applications WHERE status = 'followup'").fetchone()[0]
+    ft_offers = conn.execute("SELECT COUNT(*) FROM offers WHERE external_source = 'france-travail'").fetchone()[0]
+    active_ft_offers = conn.execute(
+        "SELECT COUNT(*) FROM offers WHERE external_source = 'france-travail' AND is_active = 1"
+    ).fetchone()[0]
+    draft_applications = conn.execute("SELECT COUNT(*) FROM applications WHERE status = 'draft'").fetchone()[0]
+    sent_applications = conn.execute("SELECT COUNT(*) FROM applications WHERE status = 'sent'").fetchone()[0]
     return {
         "offers": int(offer_count),
         "interesting": int(interesting),
         "applied": int(applied),
         "rejected": int(rejected),
         "followup": int(followup),
+        "ft_offers": int(ft_offers),
+        "active_ft_offers": int(active_ft_offers),
+        "draft_applications": int(draft_applications),
+        "sent_applications": int(sent_applications),
     }

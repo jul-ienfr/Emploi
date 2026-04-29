@@ -5,26 +5,56 @@ from rich.console import Console
 from rich.table import Table
 
 from emploi import __version__
+from emploi.browser.client import ManagedBrowserClient
+from emploi.browser.errors import ManagedBrowserError
+from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
 from emploi.db import (
     add_application,
     add_offer,
+    add_saved_search,
     application_summary,
     connect,
     db_path,
     get_offer,
     init_db,
     list_applications,
+    list_next_actions,
     list_offers,
+    list_saved_searches,
     rescore_offer,
     update_offer_status,
+)
+from emploi.france_travail.flows import (
+    apply_check_offer,
+    draft_application,
+    open_offer,
+    refresh_offer,
+    run_saved_search,
+    search_offers,
 )
 
 app = typer.Typer(help="CLI personnel pour chercher, scorer et suivre les offres d'emploi.")
 offer_app = typer.Typer(help="Gestion des offres")
 application_app = typer.Typer(help="Gestion des candidatures")
+browser_app = typer.Typer(help="Commandes Managed Browser")
+ft_app = typer.Typer(help="Flux France Travail via Managed Browser")
+search_profile_app = typer.Typer(help="Profils de recherche sauvegardés")
 app.add_typer(offer_app, name="offer")
 app.add_typer(application_app, name="application")
+app.add_typer(browser_app, name="browser")
+app.add_typer(ft_app, name="ft")
+app.add_typer(search_profile_app, name="search-profile")
 console = Console()
+
+
+def _print_browser_result(result: BrowserCommandResult) -> None:
+    console.print(f"Managed Browser {result.command} — site={result.site} profile={result.profile}")
+    console.print_json(data=result.payload)
+
+
+def _handle_browser_error(error: ManagedBrowserError) -> None:
+    console.print(f"[red]{error}[/red]")
+    raise typer.Exit(1)
 
 
 @app.callback()
@@ -178,6 +208,218 @@ def offer_archive(offer_id: int) -> None:
     console.print(f"Offre #{offer_id} archivée")
 
 
+@browser_app.command("status")
+def browser_status(
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Affiche l'état du Managed Browser."""
+    try:
+        _print_browser_result(ManagedBrowserClient().status(site=site, profile=profile))
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+
+
+@browser_app.command("open")
+def browser_open(
+    url: str,
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Ouvre une URL dans le Managed Browser."""
+    try:
+        _print_browser_result(ManagedBrowserClient().open(url, site=site, profile=profile))
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+
+
+@browser_app.command("snapshot")
+def browser_snapshot(
+    label: str | None = typer.Option(None, "--label"),
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Capture un snapshot depuis le Managed Browser."""
+    try:
+        _print_browser_result(ManagedBrowserClient().snapshot(label=label, site=site, profile=profile))
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+
+
+@browser_app.command("checkpoint")
+def browser_checkpoint(
+    name: str,
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Enregistre un checkpoint nommé dans le Managed Browser."""
+    try:
+        _print_browser_result(ManagedBrowserClient().checkpoint(name, site=site, profile=profile))
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+
+
+@ft_app.command("search")
+def ft_search(
+    query: str = typer.Argument(..., help="Mots-clés France Travail"),
+    location: str = typer.Option("", "--location", "-l"),
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Recherche France Travail via Managed Browser et importe les offres."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            results = search_offers(conn, query=query, location=location, site=site, profile=profile)
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    console.print(f"{len(results)} offre(s) France Travail traitée(s)")
+    table = Table("ID", "Action", "Score", "Titre", "URL")
+    for result in results:
+        table.add_row(
+            str(result.offer_id),
+            "créée" if result.created else "mise à jour",
+            str(result.score),
+            result.title,
+            result.browser_url,
+        )
+    console.print(table)
+
+
+@ft_app.command("refresh")
+def ft_refresh(
+    offer_id: int,
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Rafraîchit l'état d'une offre France Travail stockée."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            result = refresh_offer(conn, offer_id, site=site, profile=profile)
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    console.print(f"Offre #{result.offer_id} : {'active' if result.is_active else 'inactive'}")
+
+
+@ft_app.command("apply")
+def ft_apply(
+    offer_id: int,
+    check: bool = typer.Option(False, "--check", help="Vérifier seulement la possibilité de candidater"),
+    draft: bool = typer.Option(False, "--draft", help="Créer un brouillon local sans soumission"),
+    open_browser: bool = typer.Option(False, "--open", help="Ouvrir l'offre dans le Managed Browser"),
+    drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Vérifie, prépare ou ouvre une candidature France Travail; ne soumet jamais automatiquement."""
+    if not any((check, draft, open_browser)):
+        check = True
+    try:
+        with connect() as conn:
+            init_db(conn)
+            if check:
+                result = apply_check_offer(conn, offer_id, site=site, profile=profile)
+                console.print(
+                    f"Offre #{offer_id} : {'candidature possible' if result.can_apply else 'candidature non disponible'}"
+                )
+                for reason in result.reasons:
+                    console.print(f"- {reason}")
+            if draft:
+                draft_result = draft_application(conn, offer_id, drafts_dir=drafts_dir)
+                console.print(f"Brouillon créé : {draft_result.draft_path}")
+            if open_browser:
+                url = open_offer(conn, offer_id, site=site, profile=profile)
+                console.print(f"Offre #{offer_id} ouverte : {url}")
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+
+@search_profile_app.command("add")
+def search_profile_add(
+    name: str,
+    query: str = typer.Option(..., "--query", "-q"),
+    where_text: str = typer.Option("", "--where", "--location", "-w"),
+    radius: int = typer.Option(0, "--radius"),
+    contract: str = typer.Option("", "--contract"),
+    disabled: bool = typer.Option(False, "--disabled"),
+) -> None:
+    """Ajoute un profil de recherche France Travail."""
+    with connect() as conn:
+        init_db(conn)
+        search_id = add_saved_search(
+            conn,
+            name=name,
+            query=query,
+            where_text=where_text,
+            radius=radius,
+            contract=contract,
+            enabled=not disabled,
+        )
+    console.print(f"Profil de recherche ajouté #{search_id} — {name}")
+
+
+@search_profile_app.command("list")
+def search_profile_list(enabled_only: bool = typer.Option(False, "--enabled")) -> None:
+    """Liste les profils de recherche sauvegardés."""
+    with connect() as conn:
+        init_db(conn)
+        searches = list_saved_searches(conn, enabled=True if enabled_only else None)
+    table = Table("ID", "Nom", "Query", "Lieu", "Rayon", "Contrat", "Actif", "Dernier run")
+    for saved in searches:
+        table.add_row(
+            str(saved["id"]),
+            saved["name"],
+            saved["query"],
+            saved["where_text"],
+            str(saved["radius"]),
+            saved["contract"],
+            "oui" if saved["enabled"] else "non",
+            saved["last_run_at"],
+        )
+    console.print(table)
+
+
+@search_profile_app.command("run")
+def search_profile_run(
+    name_or_id: str | None = typer.Argument(None),
+    all_profiles: bool = typer.Option(False, "--all", help="Exécuter tous les profils actifs"),
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Exécute un profil de recherche via France Travail."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            if all_profiles:
+                profiles = list_saved_searches(conn, enabled=True)
+                total = 0
+                for saved in profiles:
+                    total += len(run_saved_search(conn, int(saved["id"]), site=site, profile=profile))
+                console.print(f"{total} offre(s) France Travail traitée(s) via {len(profiles)} profil(s)")
+                return
+            if name_or_id is None:
+                raise typer.BadParameter("Indique un nom/ID ou --all")
+            results = run_saved_search(conn, name_or_id, site=site, profile=profile)
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print(f"{len(results)} offre(s) France Travail traitée(s)")
+    table = Table("ID", "Action", "Score", "Titre", "URL")
+    for result in results:
+        table.add_row(str(result.offer_id), "créée" if result.created else "mise à jour", str(result.score), result.title, result.browser_url)
+    console.print(table)
+
+
 @app.command()
 def apply(offer_id: int, notes: str = typer.Option("", "--notes")) -> None:
     """Crée une candidature pour une offre."""
@@ -220,10 +462,36 @@ def report() -> None:
     console.print(f"Candidatures        : {summary['applied']}")
     console.print(f"À relancer          : {summary['followup']}")
     console.print(f"Refusées            : {summary['rejected']}")
+    console.print(f"Offres France Travail : {summary['ft_offers']}")
+    console.print(f"FT actives             : {summary['active_ft_offers']}")
+    console.print(f"Brouillons             : {summary['draft_applications']}")
+    console.print(f"Candidatures envoyées  : {summary['sent_applications']}")
     if top_offers:
         console.print("\nTop offres :")
         for offer in top_offers:
             console.print(f"- #{offer['id']} {offer['title']} — score {offer['score']}")
+
+
+@app.command("next")
+def next_actions() -> None:
+    """Affiche les prochaines actions utiles."""
+    with connect() as conn:
+        init_db(conn)
+        actions = list_next_actions(conn)
+
+    console.print("Prochaines actions\n")
+    if not actions:
+        console.print("Aucune action prioritaire.")
+        return
+    table = Table("Action", "Offre", "Entreprise", "Score")
+    for action in actions:
+        table.add_row(
+            str(action["action"]),
+            f"#{action['offer_id']} {action['title']}",
+            str(action["company"]),
+            str(action["score"]),
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":
