@@ -28,17 +28,19 @@ class FakeBrowser:
 def test_build_search_url_normalizes_bogeve_and_contract_filter():
     url = build_search_url('poids lourd', 'Bogève', 10, 'CDI')
 
-    assert 'lieux=74040' in url
+    assert 'lieux=74038' in url
     assert 'rayon=10' in url
     assert 'typeContrat=CDI' in url
 
 
-def test_build_search_url_unescapes_html_entities_in_saved_query():
+def test_build_search_url_keeps_only_positive_keywords_for_france_travail_ui():
     url = build_search_url('poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;', 'Bogève', 10, 'CDI')
 
     assert '%26amp' not in url
     assert '%2334' not in url
-    assert 'motsCles=poids+lourd+-SPL+-%22super+poids+lourd%22' in url
+    assert '-SPL' not in url
+    assert 'super+poids+lourd' not in url
+    assert 'motsCles=poids+lourd' in url
 
 
 def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
@@ -133,7 +135,7 @@ def test_search_offers_falls_back_to_live_dom_when_snapshot_is_summary_only_and_
 
     assert len(results) == 1
     assert results[0].title == "Chauffeur de poids lourd (H/F)"
-    assert "lieux=74040" in browser.opened[0][0]
+    assert "lieux=74038" in browser.opened[0][0]
     assert "typeContrat=CDI" in browser.opened[0][0]
     offer = get_offer(conn, results[0].offer_id)
     assert offer["external_id"] == "207LRYQ"

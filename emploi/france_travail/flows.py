@@ -19,9 +19,9 @@ from emploi.scoring import score_offer
 FT_SEARCH_URL = "https://candidat.francetravail.fr/offres/recherche"
 EXTERNAL_SOURCE = "france-travail"
 FT_LOCATION_CODES = {
-    "bogeve": "74040",
-    "bogève": "74040",
-    "bogève 74250": "74040",
+    "bogeve": "74038",
+    "bogève": "74038",
+    "bogève 74250": "74038",
 }
 
 
@@ -92,6 +92,20 @@ def _normalize_query(query: str) -> str:
     return previous.replace("“", '"').replace("”", '"').strip()
 
 
+def _france_travail_keywords(query: str) -> str:
+    """Return UI-safe France Travail keywords; keep exclusions for client filtering only."""
+    normalized = _normalize_query(query)
+    positives: list[str] = []
+    for quoted in re.findall(r'(-?)"([^"]+)"', normalized):
+        if not quoted[0]:
+            positives.append(quoted[1])
+    remainder = re.sub(r'-?"[^"]+"', ' ', normalized)
+    for token in re.findall(r"-?\w+", remainder, re.U):
+        if not token.startswith('-'):
+            positives.append(token)
+    return " ".join(positives).strip() or normalized
+
+
 def _extract_browser_dom_offers(browser: BrowserLike, *, site: str, profile: str) -> list[ExtractedOffer]:
     if not hasattr(browser, "console_eval"):
         return []
@@ -123,7 +137,7 @@ Array.from(document.querySelectorAll('li.result')).map(li => {
 
 
 def build_search_url(query: str, location: str = "", radius: int = 0, contract: str = "") -> str:
-    params: dict[str, object] = {"motsCles": _normalize_query(query)}
+    params: dict[str, object] = {"motsCles": _france_travail_keywords(query)}
     if location:
         params["lieux"] = _normalize_location(location)
     if radius > 0:
