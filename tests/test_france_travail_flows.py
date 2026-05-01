@@ -91,6 +91,19 @@ def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(t
         raw_extracted_text="Conducteur SPL H/F (H/F) CDI Temps plein",
         is_active=True,
     )
+    old_responsable_id = add_offer(
+        conn,
+        title="Responsable Transport Patrimoine Fêtes et Manifestation (H/F)",
+        company="MAIRIE ANNEMASSE",
+        location="74 - ANNEMASSE",
+        description="Coordination transport poids lourd",
+        contract_type="CDI - Temps plein",
+        external_source="france-travail",
+        external_id="OLDRESP",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/OLDRESP",
+        raw_extracted_text="Responsable Transport Patrimoine Fêtes et Manifestation CDI",
+        is_active=True,
+    )
     browser = FakeBrowser(
         [{"snapshot": "url: ...\ntitle: 18 offres", "refsCount": 118}],
         console_values=[
@@ -115,7 +128,7 @@ def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(t
 
     results = search_offers(
         conn,
-        query='poids lourd -SPL -"super poids lourd"',
+        query='poids lourd -SPL -"super poids lourd" -Responsable',
         location="Bogève",
         radius=10,
         contract="CDI",
@@ -123,9 +136,10 @@ def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(t
     )
 
     assert [result.title for result in results] == ["Chauffeur de poids lourd (H/F)"]
-    excluded = get_offer(conn, spl_id)
-    assert excluded["is_active"] == 0
-    assert excluded["status"] == "archived"
+    for offer_id in (spl_id, old_responsable_id):
+        excluded = get_offer(conn, offer_id)
+        assert excluded["is_active"] == 0
+        assert excluded["status"] == "archived"
 
 
 def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):

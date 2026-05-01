@@ -187,39 +187,75 @@ def _offer_is_relevant(offer: ExtractedOffer, *, query: str, contract: str = "")
     return True
 
 
+def _archive_excluded_existing_offer(conn, offer_id: int) -> None:
+    conn.execute(
+        """
+        UPDATE offers
+        SET is_active = 0,
+            status = CASE WHEN status = 'new' THEN 'archived' ELSE status END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (offer_id,),
+    )
+    add_offer_event(
+        conn,
+        offer_id,
+        event_type="search_excluded",
+        message="Excluded by France Travail saved-search client filters",
+    )
+
+
 def _mark_existing_excluded_offers_inactive(
     conn,
     extracted: list[ExtractedOffer],
     relevant: list[ExtractedOffer],
+    *,
+    query: str,
+    contract: str = "",
 ) -> None:
-    """Deactivate previously imported FT offers seen in the current page but excluded by client filters."""
+    """Deactivate previously imported FT offers excluded by current client filters."""
     relevant_keys = {
         (offer.external_id or offer.browser_url)
         for offer in relevant
         if offer.external_id or offer.browser_url
     }
+    archived_ids: set[int] = set()
     for offer in extracted:
         key = offer.external_id or offer.browser_url
         if not key or key in relevant_keys:
             continue
         existing = _find_existing(conn, offer)
         if existing:
-            conn.execute(
-                """
-                UPDATE offers
-                SET is_active = 0,
-                    status = CASE WHEN status = 'new' THEN 'archived' ELSE status END,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (existing["id"],),
-            )
-            add_offer_event(
-                conn,
-                int(existing["id"]),
-                event_type="search_excluded",
-                message="Excluded by France Travail saved-search client filters",
-            )
+            offer_id = int(existing["id"])
+            _archive_excluded_existing_offer(conn, offer_id)
+            archived_ids.add(offer_id)
+
+    for row in conn.execute(
+        """
+        SELECT * FROM offers
+        WHERE external_source = ?
+          AND is_active = 1
+          AND status NOT IN ('applied', 'draft', 'rejected', 'archived')
+        """,
+        (EXTERNAL_SOURCE,),
+    ).fetchall():
+        offer_id = int(row["id"])
+        if offer_id in archived_ids:
+            continue
+        stored_offer = ExtractedOffer(
+            title=row["title"] or "",
+            company=row["company"] or "",
+            location=row["location"] or "",
+            description=row["description"] or "",
+            contract_type=row["contract_type"] or "",
+            raw_text=row["raw_extracted_text"] or "",
+            browser_url=row["browser_url"] or row["url"] or "",
+            external_id=row["external_id"] or "",
+            apply_url=row["apply_url"] or "",
+        )
+        if not _offer_is_relevant(stored_offer, query=query, contract=contract):
+            _archive_excluded_existing_offer(conn, offer_id)
     conn.commit()
 
 
@@ -314,7 +350,7 @@ def search_offers(
     if not extracted:
         extracted = _extract_browser_dom_offers(client, site=site, profile=profile)
     relevant = [offer for offer in extracted if _offer_is_relevant(offer, query=normalized_query, contract=contract)]
-    _mark_existing_excluded_offers_inactive(conn, extracted, relevant)
+    _mark_existing_excluded_offers_inactive(conn, extracted, relevant, query=normalized_query, contract=contract)
     return [_upsert_extracted_offer(conn, offer, snapshot.payload) for offer in relevant]
 
 
