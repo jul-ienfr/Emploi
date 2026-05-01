@@ -531,7 +531,7 @@ def ft_smoke(
 
     try:
         client = ManagedBrowserClient()
-        opened = client.open(search_url, site=site, profile=profile)
+        opened = client.lifecycle_open(search_url, site=site, profile=profile)
         snapshot = client.snapshot(label="ft-smoke", site=site, profile=profile)
     except ManagedBrowserError as error:
         _handle_browser_error(error)

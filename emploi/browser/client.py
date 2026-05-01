@@ -33,6 +33,24 @@ class ManagedBrowserClient:
     ) -> BrowserCommandResult:
         return self._run("open", site=site, profile=profile, options=["--url", url])
 
+    def lifecycle_open(
+        self,
+        url: str,
+        *,
+        site: str = DEFAULT_SITE,
+        profile: str = DEFAULT_PROFILE,
+    ) -> BrowserCommandResult:
+        return self._run("lifecycle_open", site=site, profile=profile, options=["--url", url])
+
+    def console_eval(
+        self,
+        expression: str,
+        *,
+        site: str = DEFAULT_SITE,
+        profile: str = DEFAULT_PROFILE,
+    ) -> BrowserCommandResult:
+        return self._run("console_eval", site=site, profile=profile, options=["--expression", expression])
+
     def snapshot(
         self,
         *,
@@ -99,6 +117,10 @@ class ManagedBrowserClient:
             return ["profile", "status"]
         if subcommand == "open":
             return ["navigate"]
+        if subcommand == "lifecycle_open":
+            return ["lifecycle", "open"]
+        if subcommand == "console_eval":
+            return ["console", "eval"]
         if subcommand == "checkpoint":
             return ["storage", "checkpoint"]
         return [subcommand]

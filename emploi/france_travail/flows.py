@@ -12,15 +12,21 @@ from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
 from emploi.applications import create_application_draft
 from emploi.db import add_offer, add_offer_event, get_offer, get_saved_search, update_saved_search_last_run
-from emploi.france_travail.extractors import ExtractedOffer, extract_offer_detail, extract_offers
+from emploi.france_travail.extractors import ExtractedOffer, _offer_from_mapping, extract_offer_detail, extract_offers
 from emploi.scoring import score_offer
 
 FT_SEARCH_URL = "https://candidat.francetravail.fr/offres/recherche"
 EXTERNAL_SOURCE = "france-travail"
+FT_LOCATION_CODES = {
+    "bogeve": "74040",
+    "bogève": "74040",
+    "bogève 74250": "74040",
+}
 
 
 class BrowserLike(Protocol):
     def open(self, url: str, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult: ...
+    def lifecycle_open(self, url: str, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult: ...
     def snapshot(self, *, label: str | None = None, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult: ...
 
 
@@ -70,12 +76,49 @@ def _browser(browser: BrowserLike | None) -> BrowserLike:
     return browser or ManagedBrowserClient()
 
 
-def build_search_url(query: str, location: str = "", radius: int = 0) -> str:
+def _normalize_location(location: str) -> str:
+    normalized = re.sub(r"\s+", " ", location.strip()).casefold()
+    return FT_LOCATION_CODES.get(normalized, location)
+
+
+def _extract_browser_dom_offers(browser: BrowserLike, *, site: str, profile: str) -> list[ExtractedOffer]:
+    if not hasattr(browser, "console_eval"):
+        return []
+    expression = r"""
+Array.from(document.querySelectorAll('li.result')).map(li => {
+  const link = li.querySelector('a[href*="/offres/recherche/detail/"]');
+  const title = li.querySelector('.media-heading-title')?.innerText || '';
+  const subtext = li.querySelector('.subtext')?.innerText || '';
+  const description = li.querySelector('.description')?.innerText || '';
+  const contract = li.querySelector('.contrat')?.innerText || '';
+  return {title, href: link?.href || '', text: li.innerText || '', description, contract_type: contract, html: li.outerHTML, subtext};
+})
+""".strip()
+    try:
+        result = browser.console_eval(expression, site=site, profile=profile)  # type: ignore[attr-defined]
+    except Exception:
+        return []
+    value = result.payload.get("value") if isinstance(result.payload, dict) else None
+    if not isinstance(value, list):
+        nested = result.payload.get("result") if isinstance(result.payload, dict) else None
+        value = nested.get("value") if isinstance(nested, dict) else []
+    offers: list[ExtractedOffer] = []
+    for item in value:
+        if isinstance(item, dict):
+            offer = _offer_from_mapping(item)
+            if offer:
+                offers.append(offer)
+    return offers
+
+
+def build_search_url(query: str, location: str = "", radius: int = 0, contract: str = "") -> str:
     params: dict[str, object] = {"motsCles": query}
     if location:
-        params["lieux"] = location
+        params["lieux"] = _normalize_location(location)
     if radius > 0:
         params["rayon"] = radius
+    if contract:
+        params["typeContrat"] = contract
     return f"{FT_SEARCH_URL}?{urlencode(params)}"
 
 
@@ -93,6 +136,30 @@ def _find_existing(conn, offer: ExtractedOffer):
             (EXTERNAL_SOURCE, offer.browser_url),
         ).fetchone()
     return None
+
+
+def _matches_terms(text: str, query: str) -> bool:
+    normalized = text.casefold()
+    positives: list[str] = []
+    negatives: list[str] = []
+    for quoted in re.findall(r'(-?)"([^"]+)"', query):
+        (negatives if quoted[0] else positives).append(quoted[1].casefold())
+    remainder = re.sub(r'-?"[^"]+"', ' ', query)
+    for token in re.findall(r"-?\w+", remainder, re.U):
+        if token.startswith('-'):
+            negatives.append(token[1:].casefold())
+        else:
+            positives.append(token.casefold())
+    return all(term in normalized for term in positives) and not any(term and term in normalized for term in negatives)
+
+
+def _offer_is_relevant(offer: ExtractedOffer, *, query: str, contract: str = "") -> bool:
+    text = " ".join((offer.title, offer.company, offer.location, offer.description, offer.contract_type, offer.raw_text))
+    if query and not _matches_terms(text, query):
+        return False
+    if contract and contract.casefold() not in offer.contract_type.casefold() and contract.casefold() not in text.casefold():
+        return False
+    return True
 
 
 def _upsert_extracted_offer(conn, offer: ExtractedOffer, snapshot_payload: dict) -> SearchImportResult:
@@ -172,16 +239,20 @@ def search_offers(
     query: str,
     location: str = "",
     radius: int = 0,
+    contract: str = "",
     browser: BrowserLike | None = None,
     site: str = DEFAULT_SITE,
     profile: str = DEFAULT_PROFILE,
 ) -> list[SearchImportResult]:
     client = _browser(browser)
-    url = build_search_url(query, location, radius)
-    client.open(url, site=site, profile=profile)
+    url = build_search_url(query, location, radius, contract)
+    client.lifecycle_open(url, site=site, profile=profile)
     snapshot = client.snapshot(label="ft-search", site=site, profile=profile)
     extracted = extract_offers(snapshot.payload)
-    return [_upsert_extracted_offer(conn, offer, snapshot.payload) for offer in extracted]
+    if not extracted:
+        extracted = _extract_browser_dom_offers(client, site=site, profile=profile)
+    relevant = [offer for offer in extracted if _offer_is_relevant(offer, query=query, contract=contract)]
+    return [_upsert_extracted_offer(conn, offer, snapshot.payload) for offer in relevant]
 
 
 def run_saved_search(
@@ -202,6 +273,7 @@ def run_saved_search(
         query=saved["query"],
         location=saved["where_text"],
         radius=int(saved["radius"]),
+        contract=saved["contract"],
         browser=browser,
         site=site,
         profile=profile,

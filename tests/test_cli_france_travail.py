@@ -18,7 +18,7 @@ def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == "navigate":
+        if args[1:3] == ["lifecycle", "open"]:
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
         if args[1] == "snapshot":
             return subprocess.CompletedProcess(
@@ -49,7 +49,7 @@ def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "1 offre" in result.stdout
     assert "Technicien support" in result.stdout
-    assert calls[0][1] == "navigate"
+    assert calls[0][1:3] == ["lifecycle", "open"]
     assert calls[1][1] == "snapshot"
 
 
@@ -147,7 +147,7 @@ def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, mo
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == "navigate":
+        if args[1:3] == ["lifecycle", "open"]:
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
         if args[1] == "snapshot":
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "cards": [{"title": "Support"}]}), stderr="")
@@ -163,5 +163,5 @@ def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, mo
     assert payload["offer_count"] == 1
     assert payload["database_write"] is False
     assert payload["submit_application"] is False
-    assert [call[1] for call in calls] == ["navigate", "snapshot"]
+    assert [call[1:3] for call in calls] == [["lifecycle", "open"], ["snapshot", "--profile"]]
     assert not db_path.exists()

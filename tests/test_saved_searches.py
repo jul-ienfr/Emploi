@@ -32,6 +32,10 @@ class FakeBrowser:
         self.opened.append(url)
         return BrowserCommandResult("open", site, profile, {"ok": True, "url": url})
 
+    def lifecycle_open(self, url, *, site="france-travail", profile="emploi"):
+        self.opened.append(url)
+        return BrowserCommandResult("lifecycle_open", site, profile, {"ok": True, "url": url})
+
     def snapshot(self, *, label=None, site="france-travail", profile="emploi"):
         return BrowserCommandResult("snapshot", site, profile, self.snapshots.pop(0))
 
@@ -92,7 +96,7 @@ def test_set_saved_search_enabled_updates_by_name_or_id_and_errors(tmp_path):
 def test_run_saved_search_uses_france_travail_upper_radius_and_keeps_requested_radius(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    search_id = add_saved_search(conn, name="support", query="support", where_text="Annecy", radius=15)
+    search_id = add_saved_search(conn, name="support", query="support", where_text="Annecy", radius=15, contract="CDI")
     browser = FakeBrowser([
         {
             "cards": [
@@ -101,7 +105,8 @@ def test_run_saved_search_uses_france_travail_upper_radius_and_keeps_requested_r
                     "company": "Acme",
                     "location": "Annecy",
                     "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
-                    "description": "Support informatique",
+                    "description": "Support informatique CDI",
+                    "contract_type": "CDI",
                 }
             ],
             "text": "Technicien support Acme Annecy",
@@ -115,6 +120,7 @@ def test_run_saved_search_uses_france_travail_upper_radius_and_keeps_requested_r
     assert "motsCles=support" in browser.opened[0]
     assert "lieux=Annecy" in browser.opened[0]
     assert "rayon=20" in browser.opened[0]
+    assert "typeContrat=CDI" in browser.opened[0]
     saved = get_saved_search(conn, search_id)
     assert saved["radius"] == 20
     assert saved["requested_radius"] == 15
@@ -129,7 +135,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        if args[1] == "navigate":
+        if args[1:3] == ["lifecycle", "open"]:
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
         if args[1] == "snapshot":
             return subprocess.CompletedProcess(
@@ -143,6 +149,8 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
                                 "company": "Acme",
                                 "location": "Annecy",
                                 "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+                                "description": "Support informatique CDI",
+                                "contract_type": "CDI",
                             }
                         ],
                         "text": "Technicien support Acme Annecy",
@@ -181,7 +189,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     assert "20 (demandé 15)" in listed.stdout
     assert ran.exit_code == 0
     assert "1 offre" in ran.stdout
-    assert any(call[1] == "navigate" for call in calls)
+    assert any(call[1:3] == ["lifecycle", "open"] for call in calls)
 
 
 def test_search_profile_cli_enable_disable_toggle_existing_profile(tmp_path, monkeypatch):

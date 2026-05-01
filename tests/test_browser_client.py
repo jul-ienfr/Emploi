@@ -64,6 +64,51 @@ def test_open_uses_navigate_command_with_url_and_custom_context(monkeypatch):
     ]
 
 
+
+def test_lifecycle_open_uses_lifecycle_open_command(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    runner = FakeRunner(stdout=json.dumps({'ok': True, 'url': 'https://candidat.francetravail.fr'}))
+    client = ManagedBrowserClient(command='mb', runner=runner)
+
+    result = client.lifecycle_open('https://candidat.francetravail.fr', site='custom-site', profile='custom-profile')
+
+    assert result.ok is True
+    assert runner.calls[0][0] == [
+        'mb',
+        'lifecycle',
+        'open',
+        '--profile',
+        'custom-profile',
+        '--site',
+        'custom-site',
+        '--url',
+        'https://candidat.francetravail.fr',
+        '--json',
+    ]
+
+
+def test_console_eval_uses_console_eval_command(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    runner = FakeRunner(stdout=json.dumps({'ok': True, 'value': []}))
+    client = ManagedBrowserClient(command='mb', runner=runner)
+
+    result = client.console_eval('document.title', site='custom-site', profile='custom-profile')
+
+    assert result.ok is True
+    assert runner.calls[0][0] == [
+        'mb',
+        'console',
+        'eval',
+        '--profile',
+        'custom-profile',
+        '--site',
+        'custom-site',
+        '--expression',
+        'document.title',
+        '--json',
+    ]
+
+
 def test_snapshot_and_checkpoint_command_construction(monkeypatch):
     monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     runner = FakeRunner(stdout=json.dumps({'ok': True, 'path': '/tmp/snapshot.json'}))

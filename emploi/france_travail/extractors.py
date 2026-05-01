@@ -72,9 +72,33 @@ def external_id_from_url(url: str) -> str:
 
 
 def _offer_from_mapping(card: dict[str, Any], fallback_text: str = "") -> ExtractedOffer | None:
+    html_block = str(card.get("html") or "")
     title = _first(card, "title", "titre", "name", "label")
     url = _absolute_url(_first(card, "url", "href", "browser_url", "link"))
-    raw_text = _clean_text(card.get("text") or card.get("description") or fallback_text or json.dumps(card, ensure_ascii=False))
+    if html_block:
+        link_match = re.search(r"href=[\"']([^\"']*(?:/offres/recherche/detail/|offre/)[^\"']*)[\"']", html_block, re.I)
+        title_match = re.search(r"class=[\"'][^\"']*media-heading-title[^\"']*[\"'][^>]*>(.*?)<", html_block, re.I | re.S)
+        company_location_match = re.search(r"<p[^>]*class=[\"']subtext[\"'][^>]*>(.*?)</p>", html_block, re.I | re.S)
+        description_match = re.search(r"<p[^>]*class=[\"']description[\"'][^>]*>(.*?)</p>", html_block, re.I | re.S)
+        contract_match = re.search(r"<p[^>]*class=[\"']contrat[^\"']*[\"'][^>]*>(.*?)</p>", html_block, re.I | re.S)
+        if link_match:
+            url = _absolute_url(link_match.group(1))
+        if title_match and not title:
+            title = _clean_text(title_match.group(1))
+        company = ""
+        location = ""
+        if company_location_match:
+            parts = [part.strip(" -\xa0") for part in _clean_text(company_location_match.group(1)).split(" - ", 1)]
+            company = parts[0] if parts else ""
+            location = parts[1] if len(parts) > 1 else ""
+        description = _clean_text(description_match.group(1)) if description_match else ""
+        contract_type = _clean_text(contract_match.group(1)) if contract_match else ""
+    else:
+        company = _first(card, "company", "entreprise", "companyName", "employer")
+        location = _first(card, "location", "lieu", "place")
+        description = _first(card, "description", "summary", "snippet")
+        contract_type = _first(card, "contract_type", "contract", "typeContrat")
+    raw_text = _clean_text(card.get("text") or card.get("description") or card.get("innerText") or fallback_text or json.dumps(card, ensure_ascii=False))
     if not title:
         title = _infer_title(raw_text)
     if not title and not url:
@@ -82,14 +106,14 @@ def _offer_from_mapping(card: dict[str, Any], fallback_text: str = "") -> Extrac
     apply_url = _absolute_url(_first(card, "apply_url", "application_url", "candidature_url"))
     return ExtractedOffer(
         title=title or "Offre France Travail",
-        company=_first(card, "company", "entreprise", "companyName", "employer"),
-        location=_first(card, "location", "lieu", "place"),
+        company=company,
+        location=location,
         browser_url=url,
         external_id=_first(card, "external_id", "id", "reference") or external_id_from_url(url),
-        description=_first(card, "description", "summary", "snippet") or raw_text,
+        description=description or raw_text,
         salary=_first(card, "salary", "salaire"),
         remote=_first(card, "remote", "teletravail"),
-        contract_type=_first(card, "contract_type", "contract", "typeContrat"),
+        contract_type=contract_type,
         apply_url=apply_url,
         raw_text=raw_text,
     )
@@ -103,6 +127,12 @@ def _iter_card_mappings(payload: Any) -> list[dict[str, Any]]:
         value = payload.get(key)
         if isinstance(value, list):
             cards.extend(item for item in value if isinstance(item, dict))
+    if cards:
+        return cards
+    html_text = str(payload.get("html", ""))
+    if html_text:
+        for match in re.finditer(r"<li\b[^>]*class=[\"'][^\"']*\bresult\b[^\"']*[\"'][^>]*>(.*?)</li>", html_text, re.I | re.S):
+            cards.append({"html": match.group(0), "text": _clean_text(match.group(0))})
     return cards
 
 
