@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass
@@ -81,6 +82,16 @@ def _normalize_location(location: str) -> str:
     return FT_LOCATION_CODES.get(normalized, location)
 
 
+def _normalize_query(query: str) -> str:
+    previous = query
+    for _ in range(3):
+        decoded = html.unescape(previous)
+        if decoded == previous:
+            break
+        previous = decoded
+    return previous.replace("“", '"').replace("”", '"').strip()
+
+
 def _extract_browser_dom_offers(browser: BrowserLike, *, site: str, profile: str) -> list[ExtractedOffer]:
     if not hasattr(browser, "console_eval"):
         return []
@@ -112,7 +123,7 @@ Array.from(document.querySelectorAll('li.result')).map(li => {
 
 
 def build_search_url(query: str, location: str = "", radius: int = 0, contract: str = "") -> str:
-    params: dict[str, object] = {"motsCles": query}
+    params: dict[str, object] = {"motsCles": _normalize_query(query)}
     if location:
         params["lieux"] = _normalize_location(location)
     if radius > 0:
@@ -245,13 +256,14 @@ def search_offers(
     profile: str = DEFAULT_PROFILE,
 ) -> list[SearchImportResult]:
     client = _browser(browser)
-    url = build_search_url(query, location, radius, contract)
+    normalized_query = _normalize_query(query)
+    url = build_search_url(normalized_query, location, radius, contract)
     client.lifecycle_open(url, site=site, profile=profile)
     snapshot = client.snapshot(label="ft-search", site=site, profile=profile)
     extracted = extract_offers(snapshot.payload)
     if not extracted:
         extracted = _extract_browser_dom_offers(client, site=site, profile=profile)
-    relevant = [offer for offer in extracted if _offer_is_relevant(offer, query=query, contract=contract)]
+    relevant = [offer for offer in extracted if _offer_is_relevant(offer, query=normalized_query, contract=contract)]
     return [_upsert_extracted_offer(conn, offer, snapshot.payload) for offer in relevant]
 
 

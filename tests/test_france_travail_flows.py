@@ -33,6 +33,46 @@ def test_build_search_url_normalizes_bogeve_and_contract_filter():
     assert 'typeContrat=CDI' in url
 
 
+def test_build_search_url_unescapes_html_entities_in_saved_query():
+    url = build_search_url('poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;', 'Bogève', 10, 'CDI')
+
+    assert '%26amp' not in url
+    assert '%2334' not in url
+    assert 'motsCles=poids+lourd+-SPL+-%22super+poids+lourd%22' in url
+
+
+def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    browser = FakeBrowser(
+        [{"snapshot": "url: ...\ntitle: 60 offres", "refsCount": 118}],
+        console_values=[
+            [
+                {
+                    "title": "Chauffeur de poids lourd (H/F)",
+                    "href": "https://candidat.francetravail.fr/offres/recherche/detail/207LRYQ",
+                    "text": "Chauffeur de poids lourd CDI Temps plein",
+                    "description": "Permis C obligatoire",
+                    "contract_type": "CDI Temps plein",
+                }
+            ]
+        ],
+    )
+
+    results = search_offers(
+        conn,
+        query='poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;',
+        location="Bogève",
+        radius=10,
+        contract="CDI",
+        browser=browser,
+    )
+
+    assert len(results) == 1
+    assert '%26amp' not in browser.opened[0][0]
+    assert '%2334' not in browser.opened[0][0]
+
+
 def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
