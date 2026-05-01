@@ -119,6 +119,7 @@ def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(t
                     "title": "Chauffeur de poids lourd (H/F)",
                     "href": "https://candidat.francetravail.fr/offres/recherche/detail/207LRYQ",
                     "text": "Chauffeur de poids lourd CDI Temps plein",
+                    "subtext": "TRANSPORTS F.A.B. - 74 - Bons-en-Chablais",
                     "description": "Permis C obligatoire",
                     "contract_type": "CDI Temps plein",
                 },
@@ -180,7 +181,7 @@ def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):
     assert offer["score"] >= 0
 
 
-def test_search_offers_falls_back_to_live_dom_when_snapshot_is_summary_only_and_filters_client_side(tmp_path):
+def test_search_offers_filters_live_dom_by_requested_radius(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
     browser = FakeBrowser(
@@ -198,15 +199,12 @@ def test_search_offers_falls_back_to_live_dom_when_snapshot_is_summary_only_and_
         ],
     )
 
-    results = search_offers(conn, query="poids lourd", location="Bogève", radius=10, contract="CDI", browser=browser)
+    results = search_offers(conn, query="poids lourd", location="Bogève", radius=20, requested_radius=15, contract="CDI", browser=browser)
 
-    assert len(results) == 1
-    assert results[0].title == "Chauffeur de poids lourd (H/F)"
+    assert results == []
     assert "lieux=74038" in browser.opened[0][0]
+    assert "rayon=20" in browser.opened[0][0]
     assert "typeContrat=CDI" in browser.opened[0][0]
-    offer = get_offer(conn, results[0].offer_id)
-    assert offer["external_id"] == "207LRYQ"
-    assert offer["contract_type"] == "CDI Temps plein"
 
 
 def test_refresh_offer_updates_active_state_and_records_event(tmp_path):

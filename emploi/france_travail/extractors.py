@@ -96,6 +96,11 @@ def _offer_from_mapping(card: dict[str, Any], fallback_text: str = "") -> Extrac
     else:
         company = _first(card, "company", "entreprise", "companyName", "employer")
         location = _first(card, "location", "lieu", "place")
+        subtext = _first(card, "subtext")
+        if subtext and not location:
+            parts = [part.strip(" -\xa0") for part in subtext.split(" - ", 1)]
+            company = company or (parts[0] if parts else "")
+            location = parts[1] if len(parts) > 1 else ""
         description = _first(card, "description", "summary", "snippet")
         contract_type = _first(card, "contract_type", "contract", "typeContrat")
     raw_text = _clean_text(card.get("text") or card.get("description") or card.get("innerText") or fallback_text or json.dumps(card, ensure_ascii=False))

@@ -127,6 +127,33 @@ def test_run_saved_search_uses_france_travail_upper_radius_and_keeps_requested_r
     assert saved["last_run_at"]
 
 
+def test_run_saved_search_applies_requested_radius_after_france_travail_upper_radius(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    search_id = add_saved_search(conn, name="pl-bogeve", query="poids lourd", where_text="Bogève", radius=15, contract="CDI")
+    browser = FakeBrowser([
+        {
+            "cards": [
+                {
+                    "title": "Chauffeur de poids lourd",
+                    "company": "Transports",
+                    "location": "74 - Annemasse",
+                    "url": "https://candidat.francetravail.fr/offres/recherche/detail/ANNEMASSE",
+                    "description": "Poids lourd CDI",
+                    "contract_type": "CDI",
+                }
+            ],
+            "text": "Chauffeur de poids lourd Transports Annemasse CDI",
+        }
+    ])
+
+    results = run_saved_search(conn, search_id, browser=browser)
+
+    assert results == []
+    assert "rayon=20" in browser.opened[0]
+    assert get_saved_search(conn, search_id)["requested_radius"] == 15
+
+
 def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"

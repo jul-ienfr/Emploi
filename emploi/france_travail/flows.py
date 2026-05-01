@@ -13,6 +13,7 @@ from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
 from emploi.applications import create_application_draft
 from emploi.db import add_offer, add_offer_event, get_offer, get_saved_search, update_saved_search_last_run
+from emploi.france_travail.distance import within_requested_radius
 from emploi.france_travail.extractors import ExtractedOffer, _offer_from_mapping, extract_offer_detail, extract_offers
 from emploi.scoring import score_offer
 
@@ -178,11 +179,20 @@ def _matches_terms(text: str, query: str) -> bool:
     return all(term in normalized for term in positives) and not any(term and term in normalized for term in negatives)
 
 
-def _offer_is_relevant(offer: ExtractedOffer, *, query: str, contract: str = "") -> bool:
+def _offer_is_relevant(
+    offer: ExtractedOffer,
+    *,
+    query: str,
+    contract: str = "",
+    origin_location: str = "",
+    requested_radius: int = 0,
+) -> bool:
     text = " ".join((offer.title, offer.company, offer.location, offer.description, offer.contract_type, offer.raw_text))
     if query and not _matches_terms(text, query):
         return False
     if contract and contract.casefold() not in offer.contract_type.casefold() and contract.casefold() not in text.casefold():
+        return False
+    if not within_requested_radius(origin_location, offer.location or offer.raw_text, requested_radius):
         return False
     return True
 
@@ -213,6 +223,8 @@ def _mark_existing_excluded_offers_inactive(
     *,
     query: str,
     contract: str = "",
+    origin_location: str = "",
+    requested_radius: int = 0,
 ) -> None:
     """Deactivate previously imported FT offers excluded by current client filters."""
     relevant_keys = {
@@ -254,7 +266,13 @@ def _mark_existing_excluded_offers_inactive(
             external_id=row["external_id"] or "",
             apply_url=row["apply_url"] or "",
         )
-        if not _offer_is_relevant(stored_offer, query=query, contract=contract):
+        if not _offer_is_relevant(
+            stored_offer,
+            query=query,
+            contract=contract,
+            origin_location=origin_location,
+            requested_radius=requested_radius,
+        ):
             _archive_excluded_existing_offer(conn, offer_id)
     conn.commit()
 
@@ -337,20 +355,40 @@ def search_offers(
     location: str = "",
     radius: int = 0,
     contract: str = "",
+    requested_radius: int | None = None,
     browser: BrowserLike | None = None,
     site: str = DEFAULT_SITE,
     profile: str = DEFAULT_PROFILE,
 ) -> list[SearchImportResult]:
     client = _browser(browser)
     normalized_query = _normalize_query(query)
+    effective_requested_radius = radius if requested_radius is None else requested_radius
     url = build_search_url(normalized_query, location, radius, contract)
     client.lifecycle_open(url, site=site, profile=profile)
     snapshot = client.snapshot(label="ft-search", site=site, profile=profile)
     extracted = extract_offers(snapshot.payload)
     if not extracted:
         extracted = _extract_browser_dom_offers(client, site=site, profile=profile)
-    relevant = [offer for offer in extracted if _offer_is_relevant(offer, query=normalized_query, contract=contract)]
-    _mark_existing_excluded_offers_inactive(conn, extracted, relevant, query=normalized_query, contract=contract)
+    relevant = [
+        offer
+        for offer in extracted
+        if _offer_is_relevant(
+            offer,
+            query=normalized_query,
+            contract=contract,
+            origin_location=location,
+            requested_radius=effective_requested_radius,
+        )
+    ]
+    _mark_existing_excluded_offers_inactive(
+        conn,
+        extracted,
+        relevant,
+        query=normalized_query,
+        contract=contract,
+        origin_location=location,
+        requested_radius=effective_requested_radius,
+    )
     return [_upsert_extracted_offer(conn, offer, snapshot.payload) for offer in relevant]
 
 
@@ -373,6 +411,7 @@ def run_saved_search(
         location=saved["where_text"],
         radius=int(saved["radius"]),
         contract=saved["contract"],
+        requested_radius=int(saved["requested_radius"] or saved["radius"]),
         browser=browser,
         site=site,
         profile=profile,
