@@ -187,6 +187,42 @@ def _offer_is_relevant(offer: ExtractedOffer, *, query: str, contract: str = "")
     return True
 
 
+def _mark_existing_excluded_offers_inactive(
+    conn,
+    extracted: list[ExtractedOffer],
+    relevant: list[ExtractedOffer],
+) -> None:
+    """Deactivate previously imported FT offers seen in the current page but excluded by client filters."""
+    relevant_keys = {
+        (offer.external_id or offer.browser_url)
+        for offer in relevant
+        if offer.external_id or offer.browser_url
+    }
+    for offer in extracted:
+        key = offer.external_id or offer.browser_url
+        if not key or key in relevant_keys:
+            continue
+        existing = _find_existing(conn, offer)
+        if existing:
+            conn.execute(
+                """
+                UPDATE offers
+                SET is_active = 0,
+                    status = CASE WHEN status = 'new' THEN 'archived' ELSE status END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (existing["id"],),
+            )
+            add_offer_event(
+                conn,
+                int(existing["id"]),
+                event_type="search_excluded",
+                message="Excluded by France Travail saved-search client filters",
+            )
+    conn.commit()
+
+
 def _upsert_extracted_offer(conn, offer: ExtractedOffer, snapshot_payload: dict) -> SearchImportResult:
     timestamp = _now()
     raw_snapshot = _raw_json(snapshot_payload)
@@ -278,6 +314,7 @@ def search_offers(
     if not extracted:
         extracted = _extract_browser_dom_offers(client, site=site, profile=profile)
     relevant = [offer for offer in extracted if _offer_is_relevant(offer, query=normalized_query, contract=contract)]
+    _mark_existing_excluded_offers_inactive(conn, extracted, relevant)
     return [_upsert_extracted_offer(conn, offer, snapshot.payload) for offer in relevant]
 
 

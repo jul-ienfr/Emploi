@@ -75,6 +75,59 @@ def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
     assert '%2334' not in browser.opened[0][0]
 
 
+def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    spl_id = add_offer(
+        conn,
+        title="Conducteur SPL H/F (H/F)",
+        company="EXCOFFIER SERVICES",
+        location="74 - Bons-en-Chablais",
+        description="Mission recyclage",
+        contract_type="CDI - Temps plein",
+        external_source="france-travail",
+        external_id="205JDWR",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/205JDWR",
+        raw_extracted_text="Conducteur SPL H/F (H/F) CDI Temps plein",
+        is_active=True,
+    )
+    browser = FakeBrowser(
+        [{"snapshot": "url: ...\ntitle: 18 offres", "refsCount": 118}],
+        console_values=[
+            [
+                {
+                    "title": "Conducteur SPL H/F (H/F)",
+                    "href": "https://candidat.francetravail.fr/offres/recherche/detail/205JDWR",
+                    "text": "Conducteur SPL H/F (H/F) EXCOFFIER SERVICES CDI Temps plein",
+                    "description": "Mission recyclage",
+                    "contract_type": "CDI Temps plein",
+                },
+                {
+                    "title": "Chauffeur de poids lourd (H/F)",
+                    "href": "https://candidat.francetravail.fr/offres/recherche/detail/207LRYQ",
+                    "text": "Chauffeur de poids lourd CDI Temps plein",
+                    "description": "Permis C obligatoire",
+                    "contract_type": "CDI Temps plein",
+                },
+            ]
+        ],
+    )
+
+    results = search_offers(
+        conn,
+        query='poids lourd -SPL -"super poids lourd"',
+        location="Bogève",
+        radius=10,
+        contract="CDI",
+        browser=browser,
+    )
+
+    assert [result.title for result in results] == ["Chauffeur de poids lourd (H/F)"]
+    excluded = get_offer(conn, spl_id)
+    assert excluded["is_active"] == 0
+    assert excluded["status"] == "archived"
+
+
 def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
