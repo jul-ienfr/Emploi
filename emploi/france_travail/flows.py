@@ -424,6 +424,60 @@ def _offer_url(offer) -> str:
     return offer["browser_url"] or offer["url"]
 
 
+def _extract_detail_text(snapshot_payload: dict, detail_text: str) -> str:
+    for key in ("text", "markdown", "content"):
+        value = snapshot_payload.get(key) if isinstance(snapshot_payload, dict) else None
+        if value:
+            return str(value)
+    return detail_text
+
+
+def _extract_browser_dom_offer_detail(browser: BrowserLike, *, site: str, profile: str) -> str:
+    if not hasattr(browser, "console_eval"):
+        return ""
+    expression = r"""
+(() => {
+  const selectors = [
+    '[data-testid="offre-detail"]',
+    '#contents',
+    '#content',
+    'main',
+    'article',
+    'body'
+  ];
+  const node = selectors.map(sel => document.querySelector(sel)).find(Boolean);
+  return node?.innerText || document.body?.innerText || '';
+})()
+""".strip()
+    try:
+        result = browser.console_eval(expression, site=site, profile=profile)  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+    if not isinstance(result.payload, dict):
+        return ""
+    value = result.payload.get("value")
+    if value is None:
+        nested = result.payload.get("result")
+        value = nested.get("value") if isinstance(nested, dict) else None
+    return str(value or "").strip()
+
+
+def _looks_like_snapshot_metadata(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    return '"operation": "snapshot"' in stripped or '"observable_state"' in stripped
+
+
+def _best_detail_text(snapshot_payload: dict, detail_text: str, browser: BrowserLike, *, site: str, profile: str) -> str:
+    text = _extract_detail_text(snapshot_payload, detail_text).strip()
+    if _looks_like_snapshot_metadata(text):
+        dom_text = _extract_browser_dom_offer_detail(browser, site=site, profile=profile)
+        if dom_text:
+            return dom_text
+    return text or detail_text
+
+
 def refresh_offer(
     conn,
     offer_id: int,
@@ -439,18 +493,29 @@ def refresh_offer(
     if not url:
         raise ValueError(f"Offre #{offer_id} sans URL navigateur")
     client = _browser(browser)
-    client.open(url, site=site, profile=profile)
+    client.lifecycle_open(url, site=site, profile=profile)
     snapshot = client.snapshot(label=f"ft-offer-{offer_id}", site=site, profile=profile)
     detail = extract_offer_detail(snapshot.payload)
     timestamp = _now()
+    detail_text = _best_detail_text(snapshot.payload, detail.text, client, site=site, profile=profile)
     conn.execute(
         """
         UPDATE offers
         SET is_active = ?, last_refreshed_at = ?, raw_browser_snapshot = ?,
-            raw_extracted_text = ?, apply_url = COALESCE(NULLIF(?, ''), apply_url), updated_at = CURRENT_TIMESTAMP
+            raw_extracted_text = ?, description = CASE WHEN length(?) > length(COALESCE(description, '')) THEN ? ELSE description END,
+            apply_url = COALESCE(NULLIF(?, ''), apply_url), updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (1 if detail.is_active else 0, timestamp, _raw_json(snapshot.payload), detail.text, detail.apply_url, offer_id),
+        (
+            1 if detail.is_active else 0,
+            timestamp,
+            _raw_json(snapshot.payload),
+            detail_text,
+            detail_text,
+            detail_text,
+            detail.apply_url,
+            offer_id,
+        ),
     )
     conn.commit()
     add_offer_event(

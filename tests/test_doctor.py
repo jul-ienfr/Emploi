@@ -36,7 +36,7 @@ def test_doctor_json_reports_healthy_browser_when_status_probe_succeeds(tmp_path
     browser_command.write_text(
         "#!/usr/bin/env python3\n"
         "import json, sys\n"
-        "assert sys.argv[1:] == ['profile', 'status', '--profile', 'emploi', '--site', 'france-travail', '--json']\n"
+        "assert sys.argv[1:] == ['profile', 'status', '--profile', 'emploi-candidature', '--site', 'france-travail', '--json']\n"
         "print(json.dumps({'ok': True, 'state': 'ready'}))\n"
     )
     browser_command.chmod(0o755)
@@ -78,7 +78,7 @@ def test_doctor_json_reports_browser_probe_error(tmp_path, monkeypatch):
     assert "profile locked" in payload["managed_browser"]["error"]
     assert "emploi browser smoke" in payload["managed_browser"]["remediation"]
     assert payload["recommended_actions"] == [
-        "Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser emploi/france-travail est disponible et connecté."
+        "Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser (défaut: emploi-candidature/france-travail) est disponible et connecté."
     ]
 
 

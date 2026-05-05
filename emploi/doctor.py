@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
-from emploi import __version__
+from emploi import __version__, config as _config
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserError, ManagedBrowserUnavailableError
 from emploi.db import connect, db_path, init_db
@@ -12,6 +12,7 @@ from emploi.db import connect, db_path, init_db
 def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     """Build an operator-facing health report for the Emploi CLI."""
     database = _check_database()
+    accounts = _check_accounts()
     managed_browser = _check_managed_browser(probe=probe_browser)
 
     status = "ok"
@@ -24,12 +25,15 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     if managed_browser["status"] == "missing":
         actions.append("Installer/configurer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND.")
     elif managed_browser["status"] != "ok":
-        actions.append("Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser emploi/france-travail est disponible et connecté.")
+        actions.append("Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser (défaut: emploi-candidature/france-travail) est disponible et connecté.")
+    if accounts.get("status") != "ok":
+        actions.append(f"Configurer les comptes France Travail : créer ~/.config/emploi/accounts.json avec les deux profils (candidature, officiel).")
 
     return {
         "status": status,
         "version": __version__,
         "database": database,
+        "accounts": accounts,
         "managed_browser": managed_browser,
         "recommended_actions": actions,
     }
@@ -50,6 +54,25 @@ def _check_database() -> dict[str, Any]:
         }
     except Exception as exc:  # pragma: no cover - defensive diagnostic path
         return {"status": "error", "path": str(path), "error": str(exc)}
+
+
+def _check_accounts() -> dict[str, Any]:
+    """Check configured France Travail accounts from local config."""
+    accounts = _config.list_accounts()
+    if not accounts:
+        return {
+            "status": "missing",
+            "accounts": [],
+            "default_profile": "emploi",
+            "error": "Aucun compte configuré. Créer ~/.config/emploi/accounts.json",
+        }
+    default = _config.get_default_profile()
+    return {
+        "status": "ok",
+        "accounts": accounts,
+        "default_profile": default,
+        "count": len(accounts),
+    }
 
 
 def _check_managed_browser(*, probe: bool) -> dict[str, Any]:

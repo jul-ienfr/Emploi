@@ -30,6 +30,66 @@ def _first_non_empty(*values: object) -> str:
     return "non précisé"
 
 
+def _is_driver_pl_offer(offer) -> bool:
+    haystack = " ".join(
+        str(offer[key] or "")
+        for key in ("title", "description", "notes", "raw_extracted_text")
+        if key in offer.keys()
+    ).lower()
+    return any(term in haystack for term in ("poids lourd", "permis c", "chauffeur pl", "conducteur pl"))
+
+
+def _format_contract_line(contract: str, remote: str) -> str:
+    if remote == "non précisé":
+        return contract
+    return f"{contract} — {remote}"
+
+
+def _compose_driver_pl_draft(
+    *,
+    title: str,
+    company: str,
+    location: str,
+    contract: str,
+    remote: str,
+    salary: str,
+    url: str,
+) -> str:
+    return "\n".join(
+        [
+            f"# Brouillon de candidature — {title}",
+            "",
+            f"Offre : {title}",
+            f"Entreprise : {company}",
+            f"Lieu : {location}",
+            f"Contrat / rythme : {_format_contract_line(contract, remote)}",
+            f"Salaire : {salary}",
+            f"Lien : {url}",
+            "",
+            "## Message proposé",
+            "Bonjour,",
+            "",
+            f"Je souhaite candidater au poste de {title} à Bons-en-Chablais.",
+            "",
+            "Je dispose du permis C et je suis intéressé par les missions de conduite, livraison/enlèvement, chargement/déchargement et suivi administratif des tournées décrites dans votre annonce.",
+            "",
+            "Je précise que je n’ai pas encore de carte conducteur en cours de validité. Si mon profil vous intéresse, je peux engager la démarche rapidement ; pouvez-vous me confirmer si l’entreprise peut accompagner ou prendre en charge cette demande ?",
+            "",
+            "Cordialement,",
+            "Julien",
+            "",
+            "## À vérifier avant envoi",
+            "- Joindre le CV à jour.",
+            "- Vérifier que le permis C est bien mentionné dans le CV/profil.",
+            "- Ne pas masquer l’absence actuelle de carte conducteur.",
+            "- Demander la prise en charge/accompagnement avant d’avancer des frais.",
+            "",
+            "Sécurité : Aucune soumission automatique n'a été effectuée par emploi.",
+            "",
+        ]
+    )
+
+
 def _compose_draft(offer) -> str:
     title = _first_non_empty(offer["title"])
     company = _first_non_empty(offer["company"], "l'entreprise")
@@ -42,6 +102,17 @@ def _compose_draft(offer) -> str:
     if len(description) > 220:
         description = description[:217].rstrip() + "..."
 
+    if _is_driver_pl_offer(offer):
+        return _compose_driver_pl_draft(
+            title=title,
+            company=company,
+            location=location,
+            contract=contract,
+            remote=remote,
+            salary=salary,
+            url=url,
+        )
+
     return "\n".join(
         [
             f"# Brouillon de candidature — {title}",
@@ -49,7 +120,7 @@ def _compose_draft(offer) -> str:
             f"Offre : {title}",
             f"Entreprise : {company}",
             f"Lieu : {location}",
-            f"Contrat / rythme : {contract} — {remote}",
+            f"Contrat / rythme : {_format_contract_line(contract, remote)}",
             f"Salaire : {salary}",
             f"Lien : {url}",
             "",

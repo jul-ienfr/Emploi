@@ -23,6 +23,9 @@ FEATURE_OPTIONS: dict[str, bool] = {
     "scoring.enabled": True,
 }
 FRANCE_TRAVAIL_RADIUS_OPTIONS = (0, 5, 10, 20, 30, 50, 100)
+AUTO_APPLY_MODES = frozenset({"off", "draft", "open", "submit"})
+AUTO_APPLY_PERIODS = frozenset({"run", "daily", "weekly", "monthly"})
+AUTO_APPLY_STRATEGIES = frozenset({"best-score", "worst-score", "newest", "oldest"})
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
 
@@ -230,9 +233,12 @@ def list_offers(
     *,
     status: str | None = None,
     min_score: int | None = None,
+    include_inactive: bool = False,
 ) -> list[sqlite3.Row]:
     clauses: list[str] = []
     params: list[object] = []
+    if not include_inactive:
+        clauses.append("is_active = 1")
     if status:
         clauses.append("status = ?")
         params.append(status)
@@ -564,6 +570,54 @@ def set_saved_search_enabled(
     conn.execute(
         "UPDATE saved_searches SET enabled = ? WHERE id = ?",
         (1 if enabled else 0, int(saved["id"])),
+    )
+    conn.commit()
+    updated = get_saved_search(conn, int(saved["id"]))
+    assert updated is not None
+    return updated
+
+
+def configure_saved_search_auto_apply(
+    conn: sqlite3.Connection,
+    search_id_or_name: int | str,
+    *,
+    mode: str,
+    limit: int = 1,
+    period: str = "weekly",
+    strategy: str = "best-score",
+    min_score: int = 0,
+) -> sqlite3.Row:
+    saved = get_saved_search(conn, search_id_or_name)
+    if saved is None:
+        raise ValueError(f"Profil de recherche introuvable: {search_id_or_name}")
+    normalized_mode = mode.strip().lower()
+    normalized_period = period.strip().lower()
+    normalized_strategy = strategy.strip().lower()
+    if normalized_mode not in AUTO_APPLY_MODES:
+        raise ValueError(f"Mode auto-apply invalide: {mode}")
+    if normalized_period not in AUTO_APPLY_PERIODS:
+        raise ValueError(f"Période auto-apply invalide: {period}")
+    if normalized_strategy not in AUTO_APPLY_STRATEGIES:
+        raise ValueError(f"Stratégie auto-apply invalide: {strategy}")
+    normalized_limit = max(0, int(limit))
+    normalized_min_score = max(0, min(100, int(min_score)))
+    if normalized_mode != "off" and normalized_limit < 1:
+        raise ValueError("La limite auto-apply doit être >= 1 quand le mode est actif")
+    conn.execute(
+        """
+        UPDATE saved_searches
+        SET auto_apply_mode = ?, auto_apply_limit = ?, auto_apply_period = ?,
+            auto_apply_strategy = ?, auto_apply_min_score = ?
+        WHERE id = ?
+        """,
+        (
+            normalized_mode,
+            normalized_limit,
+            normalized_period,
+            normalized_strategy,
+            normalized_min_score,
+            int(saved["id"]),
+        ),
     )
     conn.commit()
     updated = get_saved_search(conn, int(saved["id"]))

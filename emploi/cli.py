@@ -5,6 +5,7 @@ from rich.console import Console
 from rich.table import Table
 
 from emploi.applications import create_application_draft
+from emploi.auto_apply import run_auto_apply_for_enabled_profiles, run_auto_apply_for_saved_search
 from emploi.brief import build_brief
 from emploi.doctor import build_doctor_report
 
@@ -18,6 +19,7 @@ from emploi.db import (
     FEATURE_OPTIONS,
     add_saved_search,
     application_summary,
+    configure_saved_search_auto_apply,
     connect,
     db_path,
     get_boolean_option,
@@ -58,6 +60,7 @@ application_app = typer.Typer(help="Gestion des candidatures")
 browser_app = typer.Typer(help="Commandes Managed Browser")
 ft_app = typer.Typer(help="Flux France Travail via Managed Browser")
 search_profile_app = typer.Typer(help="Profils de recherche sauvegardés")
+auto_apply_app = typer.Typer(help="Sélection/candidature automatique bornée par profil")
 import_app = typer.Typer(help="Imports génériques sans scraping")
 option_app = typer.Typer(help="Options opérateur activables/désactivables")
 app.add_typer(offer_app, name="offer")
@@ -65,6 +68,7 @@ app.add_typer(application_app, name="application")
 app.add_typer(browser_app, name="browser")
 app.add_typer(ft_app, name="ft")
 app.add_typer(search_profile_app, name="search-profile")
+app.add_typer(auto_apply_app, name="auto-apply")
 app.add_typer(import_app, name="import")
 app.add_typer(option_app, name="option")
 console = Console(soft_wrap=True)
@@ -133,6 +137,17 @@ def _format_search_radius(saved) -> str:
     return str(radius)
 
 
+def _format_auto_apply(saved) -> str:
+    mode = str(saved["auto_apply_mode"] or "off") if "auto_apply_mode" in saved.keys() else "off"
+    if mode == "off":
+        return "off"
+    limit = int(saved["auto_apply_limit"] or 0)
+    period = str(saved["auto_apply_period"] or "weekly")
+    strategy = str(saved["auto_apply_strategy"] or "best-score")
+    min_score = int(saved["auto_apply_min_score"] or 0)
+    return f"{mode} {limit}/{period} {strategy} ≥{min_score}"
+
+
 @app.callback(invoke_without_command=True)
 def main(version: bool = typer.Option(False, "--version", help="Afficher la version")) -> None:
     if version:
@@ -164,6 +179,16 @@ def doctor(json_output: bool = typer.Option(False, "--json", help="Afficher un d
     if database["status"] == "ok":
         console.print(f"Offres        : {database['offers']}")
         console.print(f"Candidatures  : {database['applications']}")
+    accounts = report.get("accounts", {})
+    if accounts.get("status") == "ok":
+        accts = accounts.get("accounts", [])
+        default_p = accounts.get("default_profile", "?")
+        console.print(f"Comptes FT    : {accounts['count']} — défaut: {default_p}")
+        for a in accts:
+            mark = " (défaut)" if a.get("default") else ""
+            console.print(f"  - {a['key']} → {a['profile']}{mark}")
+    elif accounts.get("status") == "missing":
+        console.print(f"Comptes FT    : aucun configuré — {accounts.get('error', '')}")
     browser = report["managed_browser"]
     console.print(f"Managed Browser : {browser['status']} — {browser['command']}")
     if browser.get("error"):
@@ -279,11 +304,12 @@ def offer_add(
 def offer_list(
     status: str | None = typer.Option(None, "--status"),
     min_score: int | None = typer.Option(None, "--min-score"),
+    all_offers: bool = typer.Option(False, "--all", help="Inclure aussi les offres inactives/archivées"),
 ) -> None:
     """Liste les offres."""
     with connect() as conn:
         init_db(conn)
-        offers = list_offers(conn, status=status, min_score=min_score)
+        offers = list_offers(conn, status=status, min_score=min_score, include_inactive=all_offers)
 
     table = Table("ID", "Score", "Status", "Titre", "Entreprise", "Lieu")
     for offer in offers:
@@ -742,14 +768,16 @@ def search_profile_list(enabled_only: bool = typer.Option(False, "--enabled")) -
         "Contrat",
         "Actif",
         "Dernier run",
+        "Auto-apply",
         "Notes",
-        width=160,
+        width=180,
     )
-    console.print("Colonnes: Actif — Dernier run — Notes")
+    console.print("Colonnes: Actif — Dernier run — Auto-apply — Notes")
     for saved in searches:
+        auto_apply = _format_auto_apply(saved)
         console.print(
             f"Profil {saved['name']} | Actif: {'oui' if saved['enabled'] else 'non'} | "
-            f"Dernier run: {saved['last_run_at'] or 'jamais'} | Notes: {saved['notes']}"
+            f"Dernier run: {saved['last_run_at'] or 'jamais'} | Auto-apply: {auto_apply} | Notes: {saved['notes']}"
         )
         table.add_row(
             str(saved["id"]),
@@ -760,9 +788,37 @@ def search_profile_list(enabled_only: bool = typer.Option(False, "--enabled")) -
             saved["contract"],
             "oui" if saved["enabled"] else "non",
             saved["last_run_at"] or "jamais",
+            auto_apply,
             saved["notes"],
         )
     console.print(table)
+
+
+@search_profile_app.command("auto-apply")
+def search_profile_auto_apply(
+    name_or_id: str,
+    mode: str = typer.Option("draft", "--mode", help="off, draft, open, submit"),
+    limit: int = typer.Option(1, "--limit", help="Quota par période"),
+    period: str = typer.Option("weekly", "--period", help="run, daily, weekly, monthly"),
+    strategy: str = typer.Option("best-score", "--strategy", help="best-score, worst-score, newest, oldest"),
+    min_score: int = typer.Option(0, "--min-score", help="Score minimal éligible"),
+) -> None:
+    """Configure l'auto-apply borné pour un profil de recherche."""
+    try:
+        with connect() as conn:
+            init_db(conn)
+            saved = configure_saved_search_auto_apply(
+                conn,
+                name_or_id,
+                mode=mode,
+                limit=limit,
+                period=period,
+                strategy=strategy,
+                min_score=min_score,
+            )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print(f"Auto-apply configuré #{saved['id']} — {saved['name']} : {_format_auto_apply(saved)}")
 
 
 @search_profile_app.command("run")
@@ -815,6 +871,43 @@ def search_profile_run(
     for result in results:
         table.add_row(str(result.offer_id), "créée" if result.created else "mise à jour", str(result.score), result.title, result.browser_url)
     console.print(table)
+
+
+@auto_apply_app.command("run")
+def auto_apply_run(
+    profile_name: str | None = typer.Option(None, "--profile", help="Nom ou ID du profil à exécuter"),
+    all_profiles: bool = typer.Option(False, "--all-enabled", help="Exécuter tous les profils actifs avec auto-apply actif"),
+    drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
+    today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
+) -> None:
+    """Exécute l'auto-apply borné: sélectionne une offre et crée un brouillon, sans soumission live."""
+    _ensure_option_enabled("drafts.enabled")
+    if not profile_name and not all_profiles:
+        raise typer.BadParameter("Indique --profile ou --all-enabled")
+    try:
+        with connect() as conn:
+            init_db(conn)
+            if all_profiles:
+                results = run_auto_apply_for_enabled_profiles(conn, drafts_dir=drafts_dir, today=today)
+            else:
+                assert profile_name is not None
+                results = [run_auto_apply_for_saved_search(conn, profile_name, drafts_dir=drafts_dir, today=today)]
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if not results:
+        console.print("Aucun profil auto-apply actif.")
+        return
+    for result in results:
+        prefix = f"{result.profile_name} — {result.mode}/{result.strategy}"
+        if result.status in {"drafted", "opened"}:
+            console.print(f"{prefix} : offre sélectionnée #{result.offer_id} — {result.title}")
+            if result.draft_path:
+                console.print(f"Brouillon créé : {result.draft_path}")
+        elif result.status == "guarded":
+            console.print(f"{prefix} : {result.message}")
+        else:
+            console.print(f"{prefix} : {result.message}")
 
 
 @app.command()

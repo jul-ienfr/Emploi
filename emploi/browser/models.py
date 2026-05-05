@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from emploi import config as _config
 
-DEFAULT_PROFILE = "emploi"
+DEFAULT_PROFILE: str = _config.get_default_profile()
 DEFAULT_SITE = "france-travail"
 
 

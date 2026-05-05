@@ -8,13 +8,16 @@ class FakeBrowser:
         self.snapshots = list(snapshots)
         self.console_values = list(console_values or [])
         self.opened = []
+        self.commands = []
 
     def open(self, url, *, site="france-travail", profile="emploi"):
         self.opened.append((url, site, profile))
+        self.commands.append(("open", url, site, profile))
         return BrowserCommandResult("open", site, profile, {"ok": True, "url": url})
 
     def lifecycle_open(self, url, *, site="france-travail", profile="emploi"):
         self.opened.append((url, site, profile))
+        self.commands.append(("lifecycle_open", url, site, profile))
         return BrowserCommandResult("lifecycle_open", site, profile, {"ok": True, "url": url})
 
     def snapshot(self, *, label=None, site="france-travail", profile="emploi"):
@@ -223,10 +226,79 @@ def test_refresh_offer_updates_active_state_and_records_event(tmp_path):
 
     assert result.offer_id == offer_id
     assert result.is_active is False
+    assert browser.commands[0][0] == "lifecycle_open"
     offer = get_offer(conn, offer_id)
     assert offer["is_active"] == 0
     assert offer["last_refreshed_at"]
     assert list_offer_events(conn, offer_id)[0]["event_type"] == "refresh"
+
+
+def test_refresh_offer_enriches_stored_offer_from_detail_page(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur Poids Lourd H/F",
+        company="Slash Intérim",
+        location="74 - Bons-en-Chablais",
+        description="Résumé de carte tronqué...",
+        contract_type="CDI",
+        external_source="france-travail",
+        external_id="1681160",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/1681160",
+    )
+    browser = FakeBrowser(
+        [
+            {
+                "text": (
+                    "Chauffeur Poids Lourd H/F SLASH Intérim Bons-en-Chablais CDI "
+                    "Description complète de la mission avec horaires, rémunération et profil recherché. "
+                    "Salaire : 12.50 EUR par heure. Candidater"
+                ),
+                "apply_url": "/candidat/offres/candidature/1681160",
+            }
+        ]
+    )
+
+    result = refresh_offer(conn, offer_id, browser=browser)
+
+    assert result.is_active is True
+    assert browser.commands[0][0] == "lifecycle_open"
+    offer = get_offer(conn, offer_id)
+    assert "Description complète de la mission" in offer["description"]
+    assert "rémunération" in offer["raw_extracted_text"]
+    assert offer["apply_url"].endswith("/candidat/offres/candidature/1681160")
+
+
+def test_refresh_offer_falls_back_to_dom_when_snapshot_is_metadata_only(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur Poids Lourd H/F",
+        description="Résumé de carte tronqué...",
+        external_source="france-travail",
+        external_id="1681160",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/1681160",
+    )
+    browser = FakeBrowser(
+        [
+            {
+                "operation": "snapshot",
+                "observable_state": {"title": "Offre d'emploi Chauffeur Poids Lourd H/F"},
+                "snapshot": "url: https://candidat.francetravail.fr/offres/recherche/detail/1681160",
+            }
+        ],
+        console_values=[
+            "Chauffeur Poids Lourd H/F\nDescription complète issue du DOM\nCandidater"
+        ],
+    )
+
+    refresh_offer(conn, offer_id, browser=browser)
+
+    offer = get_offer(conn, offer_id)
+    assert "Description complète issue du DOM" in offer["raw_extracted_text"]
+    assert "Description complète issue du DOM" in offer["description"]
 
 
 def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(tmp_path):

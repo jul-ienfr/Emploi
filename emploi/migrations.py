@@ -81,5 +81,32 @@ def migrate(conn: sqlite3.Connection) -> None:
     )
     _add_column_if_missing(conn, "saved_searches", "requested_radius", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing(conn, "saved_searches", "notes", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "saved_searches", "auto_apply_mode", "TEXT NOT NULL DEFAULT 'off'")
+    _add_column_if_missing(conn, "saved_searches", "auto_apply_limit", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "saved_searches", "auto_apply_period", "TEXT NOT NULL DEFAULT 'weekly'")
+    _add_column_if_missing(conn, "saved_searches", "auto_apply_strategy", "TEXT NOT NULL DEFAULT 'best-score'")
+    _add_column_if_missing(conn, "saved_searches", "auto_apply_min_score", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing(conn, "applications", "draft_path", "TEXT NOT NULL DEFAULT ''")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS auto_apply_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            saved_search_id INTEGER NOT NULL,
+            offer_id INTEGER NOT NULL,
+            application_id INTEGER,
+            mode TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            period_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (saved_search_id) REFERENCES saved_searches(id),
+            FOREIGN KEY (offer_id) REFERENCES offers(id),
+            FOREIGN KEY (application_id) REFERENCES applications(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_auto_apply_runs_profile_period
+        ON auto_apply_runs (saved_search_id, period_key, status);
+        """
+    )
     conn.commit()

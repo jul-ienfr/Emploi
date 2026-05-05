@@ -39,6 +39,23 @@ def test_list_offers_can_filter_by_status(tmp_path):
     assert offers[0]["title"] == "Support"
 
 
+def test_list_offers_excludes_inactive_by_default(tmp_path):
+    db_path = tmp_path / "emploi.sqlite"
+    conn = connect(db_path)
+    init_db(conn)
+    active = add_offer(conn, title="Actif", company="A")
+    inactive = add_offer(conn, title="Inactif", company="B")
+    conn.execute("UPDATE offers SET is_active = 0 WHERE id = ?", (inactive,))
+    conn.commit()
+
+    default = list_offers(conn)
+    assert len(default) == 1
+    assert default[0]["title"] == "Actif"
+
+    all_offers = list_offers(conn, include_inactive=True)
+    assert len(all_offers) == 2
+
+
 def test_add_offer_and_rescore_use_richer_v2_reason_lines(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)

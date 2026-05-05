@@ -86,3 +86,37 @@ def test_application_draft_reuses_existing_draft_application_and_next_shows_path
     assert next_result.exit_code == 0
     assert draft_path in next_result.stdout
     assert "envoyer manuellement" in next_result.stdout
+
+
+def test_application_draft_uses_driver_profile_message_for_pl_offer(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    drafts_dir = tmp_path / "brouillons"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    conn = connect(db_path)
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur Poids Lourd H/F",
+        company="Slash Intérim",
+        location="74 - Bons-en-Chablais",
+        url="https://candidat.francetravail.fr/offres/recherche/detail/1681160",
+        description=(
+            "Conduite poids lourd, livraison/enlèvement, chargement/déchargement, "
+            "suivi administratif des tournées. Permis C indispensable. Carte conducteur demandée."
+        ),
+        contract_type="CDI",
+    )
+    conn.close()
+
+    result = runner.invoke(app, ["application", "draft", str(offer_id), "--drafts-dir", str(drafts_dir)])
+
+    assert result.exit_code == 0
+    content = next(drafts_dir.glob("*.md")).read_text(encoding="utf-8")
+    assert "## Message proposé" in content
+    assert "Je souhaite candidater au poste de Chauffeur Poids Lourd H/F à Bons-en-Chablais." in content
+    assert "Je dispose du permis C" in content
+    assert "je n’ai pas encore de carte conducteur en cours de validité" in content
+    assert "accompagner ou prendre en charge cette demande" in content
+    assert "motivé, sérieux, ponctuel" not in content
+    assert "support informatique" not in content
+    assert "Ne pas masquer l’absence actuelle de carte conducteur" in content
