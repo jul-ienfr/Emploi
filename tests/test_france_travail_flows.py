@@ -314,6 +314,9 @@ def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(
     browser = FakeBrowser([{"text": "Offre active. Candidater maintenant"}])
 
     ok = apply_check_offer(conn, active_id, browser=browser)
+    add_application(conn, active_id, status="draft")
+    draft_browser = FakeBrowser([{"text": "Candidater"}])
+    draft = apply_check_offer(conn, active_id, browser=draft_browser)
     add_application(conn, active_id, status="sent")
     already_browser = FakeBrowser([{"text": "Candidater"}])
     already = apply_check_offer(conn, active_id, browser=already_browser)
@@ -321,9 +324,12 @@ def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(
 
     assert ok.can_apply is True
     assert browser.commands[0][0] == "lifecycle_open"
+    assert draft_browser.commands[0][0] == "lifecycle_open"
     assert already_browser.commands[0][0] == "lifecycle_open"
-    assert not any(command[0] == "open" for command in browser.commands + already_browser.commands)
+    assert not any(command[0] == "open" for command in browser.commands + draft_browser.commands + already_browser.commands)
     assert any("signal" in reason.lower() for reason in ok.reasons)
+    assert draft.can_apply is True
+    assert not any("déjà" in reason.lower() for reason in draft.reasons)
     assert already.can_apply is False
     assert any("déjà" in reason.lower() for reason in already.reasons)
     assert inactive.can_apply is False

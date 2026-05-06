@@ -528,9 +528,14 @@ def refresh_offer(
     return RefreshResult(offer_id, detail.is_active, url)
 
 
-def _has_application(conn, offer_id: int) -> bool:
-    row = conn.execute("SELECT 1 FROM applications WHERE offer_id = ? LIMIT 1", (offer_id,)).fetchone()
-    return row is not None
+def _application_statuses(conn, offer_id: int) -> list[str]:
+    rows = conn.execute("SELECT status FROM applications WHERE offer_id = ?", (offer_id,)).fetchall()
+    return [str(row["status"]).strip().lower() for row in rows]
+
+
+def _has_submitted_application(conn, offer_id: int) -> bool:
+    draft_like = {"draft", "cancelled", "rejected"}
+    return any(status not in draft_like for status in _application_statuses(conn, offer_id))
 
 
 def apply_check_offer(
@@ -545,7 +550,10 @@ def apply_check_offer(
     if offer is None:
         raise ValueError(f"Offre introuvable: {offer_id}")
     reasons: list[str] = []
-    already_applied = _has_application(conn, offer_id) or offer["status"] == "applied"
+    application_statuses = _application_statuses(conn, offer_id)
+    already_applied = _has_submitted_application(conn, offer_id) or (
+        offer["status"] == "applied" and not application_statuses
+    )
     stored_active = bool(offer["is_active"])
     url = _offer_url(offer)
     detail_active = stored_active
