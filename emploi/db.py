@@ -22,6 +22,9 @@ FEATURE_OPTIONS: dict[str, bool] = {
     "managed_browser.enabled": True,
     "scoring.enabled": True,
 }
+AUTO_FOLLOWUP_ENABLED_KEY = "application.followup.auto.enabled"
+AUTO_FOLLOWUP_DELAY_KEY = "application.followup.auto.delay_days"
+DEFAULT_AUTO_FOLLOWUP_DELAY_DAYS = 10
 FRANCE_TRAVAIL_RADIUS_OPTIONS = (0, 5, 10, 20, 30, 50, 100)
 AUTO_APPLY_MODES = frozenset({"off", "draft", "open", "submit"})
 AUTO_APPLY_PERIODS = frozenset({"run", "daily", "weekly", "monthly"})
@@ -149,6 +152,59 @@ def set_boolean_option(conn: sqlite3.Connection, key: str, enabled: bool) -> dic
 def toggle_boolean_option(conn: sqlite3.Connection, key: str) -> dict[str, object]:
     normalized = validate_option_key(key)
     return set_boolean_option(conn, normalized, not get_boolean_option(conn, normalized))
+
+
+def _get_setting_value(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return None if row is None else str(row["value"])
+
+
+def _set_setting_value(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (key, value),
+    )
+    conn.commit()
+
+
+def normalize_followup_delay(value: str | int) -> int:
+    text = str(value).strip().lower()
+    if text.endswith("d"):
+        text = text[:-1]
+    try:
+        days = int(text)
+    except ValueError as error:
+        raise ValueError("Le délai de relance doit être un nombre de jours, ex: 7 ou 10d") from error
+    if days < 1 or days > 365:
+        raise ValueError("Le délai de relance doit être compris entre 1 et 365 jours")
+    return days
+
+
+def get_auto_followup_config(conn: sqlite3.Connection) -> dict[str, object]:
+    enabled_raw = _get_setting_value(conn, AUTO_FOLLOWUP_ENABLED_KEY)
+    delay_raw = _get_setting_value(conn, AUTO_FOLLOWUP_DELAY_KEY)
+    enabled = False if enabled_raw is None else _parse_boolean_option(AUTO_FOLLOWUP_ENABLED_KEY, enabled_raw)
+    delay_days = DEFAULT_AUTO_FOLLOWUP_DELAY_DAYS if delay_raw is None else normalize_followup_delay(delay_raw)
+    return {"enabled": enabled, "delay_days": delay_days}
+
+
+def set_auto_followup_config(
+    conn: sqlite3.Connection,
+    *,
+    enabled: bool | None = None,
+    delay_days: str | int | None = None,
+) -> dict[str, object]:
+    if enabled is not None:
+        _set_setting_value(conn, AUTO_FOLLOWUP_ENABLED_KEY, "true" if enabled else "false")
+    if delay_days is not None:
+        _set_setting_value(conn, AUTO_FOLLOWUP_DELAY_KEY, str(normalize_followup_delay(delay_days)))
+    return get_auto_followup_config(conn)
 
 
 def add_offer(

@@ -138,6 +138,10 @@ emploi apply 1
 emploi application draft 1
 emploi application list
 emploi application followup 1 2026-05-04
+emploi application followup-config enable --after 10d
+emploi application followup-config disable
+emploi application followup schedule 1 --after 7d --force
+emploi application due
 emploi document-profile set poids-lourd --cv PATH --cover-letter PATH --default
 emploi nextcloud-files set emploi --base-url URL --remote-root /Emploi --username-pass nextcloud/username --password-pass nextcloud/password --default
 emploi kanban set chauffeur-pl --base-url URL --board-id BOARD_ID --username-pass nextcloud/username --password-pass nextcloud/password
@@ -149,7 +153,7 @@ emploi next
 emploi report
 ```
 
-Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, WebDAV/Files pour les dossiers candidature. Les credentials restent dans `pass`; les fichiers de config locaux stockent seulement les noms d'entrées `pass`, jamais les secrets. Utiliser `--dry-run` avant tout upload WebDAV ou création de carte Deck live. `application pipeline` orchestre export Files + carte Deck et réutilise l'event `nextcloud_deck_card` existant sauf `--force-card`.
+Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, WebDAV/Files pour les dossiers candidature. Les credentials restent dans `pass`; les fichiers de config locaux stockent seulement les noms d'entrées `pass`, jamais les secrets. Utiliser `--dry-run` avant tout upload WebDAV ou création de carte Deck live. `application pipeline` orchestre export Files + carte Deck et réutilise l'event `nextcloud_deck_card` existant sauf `--force-card`. Les relances automatiques restent sous contrôle opérateur : désactivées par défaut, activables avec `application followup-config enable --after 10d`, désactivables avec `disable`, et surchargées par run via `--schedule-followup/--no-schedule-followup` + `--followup-after`.
 
 ## Workflow agent recommandé
 

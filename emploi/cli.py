@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typer
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -25,10 +26,12 @@ from emploi.db import (
     configure_saved_search_auto_apply,
     connect,
     db_path,
+    get_auto_followup_config,
     get_boolean_option,
     get_offer,
     validate_option_key,
     get_option,
+    normalize_followup_delay,
     get_saved_search,
     init_db,
     install_default_julien_search_profiles,
@@ -39,6 +42,7 @@ from emploi.db import (
     list_saved_searches,
     rescore_offer,
     schedule_application_followup,
+    set_auto_followup_config,
     set_boolean_option,
     set_saved_search_enabled,
     toggle_boolean_option,
@@ -1249,6 +1253,19 @@ def application_draft(
     console.print("Aucune soumission automatique : relis puis envoie manuellement.")
 
 
+def _parse_today(today: str | None = None) -> date:
+    if not today:
+        return date.today()
+    try:
+        return date.fromisoformat(today)
+    except ValueError as error:
+        raise typer.BadParameter("La date --today doit être au format YYYY-MM-DD") from error
+
+
+def _followup_date_from_delay(*, delay_days: int, today: str | None = None) -> str:
+    return (_parse_today(today) + timedelta(days=delay_days)).isoformat()
+
+
 def _resolve_nextcloud_document_profile(include_documents: bool, document_profile_name: str):
     if not include_documents:
         return None
@@ -1328,6 +1345,9 @@ def application_pipeline(
     include_documents: bool = typer.Option(False, "--include-documents", help="Ajouter CV/LM du profil documents"),
     document_profile_name: str = typer.Option("", "--document-profile", help="Profil documents; vide = défaut"),
     force_card: bool = typer.Option(False, "--force-card", help="Créer une nouvelle carte même si un événement existe déjà"),
+    schedule_followup: bool | None = typer.Option(None, "--schedule-followup/--no-schedule-followup", help="Planifier une relance selon la config ou désactiver pour ce run"),
+    followup_after: str = typer.Option("", "--followup-after", help="Délai de relance pour ce run, ex: 7d; vide = config"),
+    today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
 ) -> None:
     """Exporte le dossier candidature puis prépare/crée la carte Deck liée."""
     _ensure_option_enabled("drafts.enabled")
@@ -1368,6 +1388,12 @@ def application_pipeline(
                 dry_run=dry_run,
                 force=force_card,
             )
+            auto_followup = get_auto_followup_config(conn)
+            should_schedule_followup = bool(auto_followup["enabled"]) if schedule_followup is None else schedule_followup
+            followup_date = ""
+            if should_schedule_followup:
+                delay_days = normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
+                followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     verb = "préparé" if dry_run else "effectué"
@@ -1383,6 +1409,12 @@ def application_pipeline(
         console.print(f"Carte ID : {card_result.card_id}")
     if card_result.reused_existing:
         console.print("Carte déjà enregistrée : aucune nouvelle carte créée. Utilise --force-card pour recréer.")
+    if followup_date:
+        console.print(f"Relance : prévue le {followup_date}")
+    elif schedule_followup is False:
+        console.print("Relance : ignorée pour ce run")
+    else:
+        console.print("Relance : non planifiée (auto désactivé)")
     if dry_run:
         console.print("Dry-run : aucun upload, aucun événement, aucune carte créée.")
 
@@ -1410,17 +1442,103 @@ def application_update(application_id: int, status: str) -> None:
     _application_status_update(application_id, status)
 
 
-@application_app.command("followup")
-def application_followup(application_id: int, followup_date: str) -> None:
-    """Planifie une relance manuelle au format YYYY-MM-DD."""
+@application_app.command("followup-config")
+def application_followup_config(
+    action: str = typer.Argument("show", help="show|enable|disable"),
+    after: str = typer.Option("", "--after", help="Délai par défaut, ex: 7d ou 10"),
+) -> None:
+    """Configure la planification automatique des relances."""
+    normalized = action.strip().lower()
+    if normalized not in {"show", "enable", "disable"}:
+        raise typer.BadParameter("Action attendue: show, enable ou disable")
     try:
         with connect() as conn:
             init_db(conn)
-            application = schedule_application_followup(conn, application_id, followup_date)
+            if normalized == "show":
+                config = get_auto_followup_config(conn)
+            elif normalized == "enable":
+                config = set_auto_followup_config(conn, enabled=True, delay_days=after or None)
+            else:
+                config = set_auto_followup_config(conn, enabled=False, delay_days=after or None)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    state = "activée" if config["enabled"] else "désactivée"
+    console.print(f"Relance auto {state} — délai: {config['delay_days']} jour(s)")
+
+
+@application_app.command("followup")
+def application_followup(
+    target: str,
+    value: str | None = typer.Argument(None, help="Date YYYY-MM-DD ou offer_id si `schedule`"),
+    after: str = typer.Option("", "--after", help="Délai ex: 7d; utilisé avec `schedule`"),
+    force: bool = typer.Option(False, "--force", help="Planifier même si la relance auto est désactivée"),
+    today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
+) -> None:
+    """Planifie une relance: `followup APP_ID YYYY-MM-DD` ou `followup schedule OFFER_ID`."""
+    if target.strip().lower() == "schedule":
+        if value is None:
+            raise typer.BadParameter("Indique l'ID de l'offre après `schedule`")
+        try:
+            offer_id = int(value)
+        except ValueError as error:
+            raise typer.BadParameter("L'ID offre doit être numérique") from error
+        _schedule_followup_for_offer(offer_id, after=after, force=force, today=today)
+        return
+    if value is None:
+        raise typer.BadParameter("Indique une date de relance YYYY-MM-DD")
+    try:
+        application_id = int(target)
+        with connect() as conn:
+            init_db(conn)
+            application = schedule_application_followup(conn, application_id, value)
     except ValueError as error:
         console.print(str(error))
         raise typer.Exit(1) from error
     console.print(f"Candidature #{application_id} → followup le {application['next_action_at']}")
+
+
+@application_app.command("followup-schedule")
+def application_followup_schedule_alias(
+    offer_id: int,
+    after: str = typer.Option("", "--after", help="Délai ex: 7d; vide = délai configuré"),
+    force: bool = typer.Option(False, "--force", help="Planifier même si la relance auto est désactivée"),
+    today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
+) -> None:
+    _schedule_followup_for_offer(offer_id, after=after, force=force, today=today)
+
+
+@application_app.command("due")
+def application_due(today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu")) -> None:
+    """Liste les relances arrivées à échéance."""
+    day = _parse_today(today).isoformat()
+    with connect() as conn:
+        init_db(conn)
+        rows = list_next_actions(conn, today=day, limit=20)
+    due = [row for row in rows if row["action"] == "Relancer candidature"]
+    if not due:
+        console.print("Aucune relance due.")
+        return
+    table = Table("Offre", "Titre", "Entreprise", "Échéance")
+    for row in due:
+        table.add_row(str(row["offer_id"]), row["title"], row["company"], row.get("due_date", ""))
+    console.print(table)
+
+
+def _schedule_followup_for_offer(offer_id: int, *, after: str = "", force: bool = False, today: str | None = None) -> None:
+    try:
+        with connect() as conn:
+            init_db(conn)
+            config = get_auto_followup_config(conn)
+            if not config["enabled"] and not force:
+                console.print("Relance auto désactivée. Utilise `application followup-config enable --after 10d` ou --force.")
+                return
+            delay_days = normalize_followup_delay(after) if after else int(config["delay_days"])
+            followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
+            application_id = add_application(conn, offer_id, status="sent")
+            application = schedule_application_followup(conn, application_id, followup_date)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print(f"Relance planifiée pour l'offre #{offer_id} le {application['next_action_at']}")
 
 
 @application_app.command("list")
