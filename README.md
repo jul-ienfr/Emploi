@@ -31,11 +31,12 @@ Variables utiles :
 export EMPLOI_DB=/tmp/emploi.sqlite
 
 # Commande externe utilisée par ManagedBrowserClient.
-# Par défaut: managed-browser. Peut aussi pointer vers le wrapper local Camofox:
-export EMPLOI_MANAGED_BROWSER_COMMAND="node /home/jul/tools/camofox-browser/scripts/managed-browser.js"
+# Par défaut: managed-browser. En local, le wrapper Python est préféré :
+export MANAGED_BROWSER_URL="http://127.0.0.1:9377"
+export EMPLOI_MANAGED_BROWSER_COMMAND="managed-browser"
 ```
 
-La commande Managed Browser doit accepter le protocole du wrapper Camofox : `profile status`, `flow run open_url`, `snapshot`, `storage checkpoint`, et renvoyer du JSON sur stdout.
+La commande Managed Browser doit accepter le protocole du wrapper Camofox : `profile status`, `navigate` pour les ouvertures navigateur explicites, `lifecycle open` pour les flux France Travail, `snapshot`, `console eval`, `storage checkpoint`, et renvoyer du JSON sur stdout. Les flux France Travail utilisent `lifecycle open` pour réutiliser proprement la session et éviter les conflits d'onglet/HTTP 409.
 
 ## Commandes V1
 
@@ -72,7 +73,10 @@ emploi ft refresh 1
 emploi ft apply 1 --check
 emploi ft apply 1 --draft
 emploi ft apply 1 --open
+emploi ft apply 1 --partner hellowork
 ```
+
+`emploi ft apply` reste assisté : `--check` vérifie sans soumettre, `--open` ouvre l'offre France Travail, et `--partner NOM` ouvre explicitement un handoff externe détecté après choix opérateur. Même avec `--partner`, le CLI n'effectue aucun clic final ni soumission de candidature.
 
 Imports multi-sources sans scraping direct :
 

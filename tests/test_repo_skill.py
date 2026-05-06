@@ -33,3 +33,11 @@ def test_readme_points_hermes_to_repo_skill():
     readme = (PROJECT_ROOT / "README.md").read_text()
     assert "skills/emploi-cli/SKILL.md" in readme
     assert "Hermes" in readme
+
+
+def test_readme_documents_current_france_travail_managed_browser_contract():
+    readme = (PROJECT_ROOT / "README.md").read_text()
+    assert "EMPLOI_MANAGED_BROWSER_COMMAND=\"managed-browser\"" in readme
+    assert "`lifecycle open` pour les flux France Travail" in readme
+    assert "emploi ft apply 1 --partner hellowork" in readme
+    assert "aucun clic final ni soumission" in readme
