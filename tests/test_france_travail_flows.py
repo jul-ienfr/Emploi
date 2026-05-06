@@ -315,10 +315,14 @@ def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(
 
     ok = apply_check_offer(conn, active_id, browser=browser)
     add_application(conn, active_id, status="sent")
-    already = apply_check_offer(conn, active_id, browser=FakeBrowser([{"text": "Candidater"}]))
+    already_browser = FakeBrowser([{"text": "Candidater"}])
+    already = apply_check_offer(conn, active_id, browser=already_browser)
     inactive = apply_check_offer(conn, inactive_id, browser=FakeBrowser([{"text": "Candidater"}]))
 
     assert ok.can_apply is True
+    assert browser.commands[0][0] == "lifecycle_open"
+    assert already_browser.commands[0][0] == "lifecycle_open"
+    assert not any(command[0] == "open" for command in browser.commands + already_browser.commands)
     assert any("signal" in reason.lower() for reason in ok.reasons)
     assert already.can_apply is False
     assert any("déjà" in reason.lower() for reason in already.reasons)

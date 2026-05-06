@@ -552,7 +552,7 @@ def apply_check_offer(
     has_apply_signal = False
     if url:
         client = _browser(browser)
-        client.open(url, site=site, profile=profile)
+        client.lifecycle_open(url, site=site, profile=profile)
         snapshot = client.snapshot(label=f"ft-apply-check-{offer_id}", site=site, profile=profile)
         detail = extract_offer_detail(snapshot.payload)
         detail_active = detail.is_active
