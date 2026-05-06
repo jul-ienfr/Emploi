@@ -3,11 +3,12 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlencode
+from urllib.parse import urljoin, urlencode
 
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
@@ -57,7 +58,7 @@ class ApplyCheckResult:
     has_apply_signal: bool
     reasons: list[str]
     browser_url: str
-    partner_handoff: list[str] | None = None
+    partner_handoff: list[dict[str, str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -539,14 +540,90 @@ def _has_submitted_application(conn, offer_id: int) -> bool:
     return any(status not in draft_like for status in _application_statuses(conn, offer_id))
 
 
-def _detect_partner_handoff(text: str) -> list[str]:
+def _payload_text(payload: object) -> str:
+    if isinstance(payload, dict):
+        parts = [str(payload.get(key) or "") for key in ("text", "snapshot", "html", "markdown", "content")]
+        result = payload.get("result")
+        if result is not None:
+            parts.append(_payload_text(result))
+        return "\n".join(part for part in parts if part)
+    return str(payload or "")
+
+
+def _extract_partner_handoff_from_dom(browser: BrowserLike, *, site: str, profile: str) -> list[dict[str, str]]:
+    if not hasattr(browser, "console_eval"):
+        return []
+    expression = r"""
+(() => {
+  const names = ['Meteojob', 'HelloWork'];
+  const partners = [];
+  const links = Array.from(document.querySelectorAll('a[href]'));
+  for (const name of names) {
+    const normalized = name.toLowerCase();
+    const direct = links.find((a) => ((a.innerText || a.textContent || '') + ' ' + (a.href || '')).toLowerCase().includes(normalized));
+    if (direct) {
+      partners.push({name, url: direct.href || direct.getAttribute('href') || ''});
+      continue;
+    }
+    const card = Array.from(document.querySelectorAll('div, section, article, li')).find((el) => (el.innerText || el.textContent || '').trim().toLowerCase() === normalized);
+    const cardLink = card?.querySelector('a[href]') || card?.closest('a[href]') || card?.parentElement?.querySelector('a[href]');
+    if (cardLink) {
+      partners.push({name, url: cardLink.href || cardLink.getAttribute('href') || ''});
+    }
+  }
+  return partners;
+})()
+"""
+    result = browser.console_eval(expression, site=site, profile=profile)
+    payload = result.payload.get("result") if isinstance(result.payload, dict) else None
+    if isinstance(payload, dict) and isinstance(payload.get("value"), list):
+        payload = payload["value"]
+    if not isinstance(payload, list):
+        return []
+    partners: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        url = str(item.get("url") or "")
+        if name not in {"Meteojob", "HelloWork"} or name in seen:
+            continue
+        partner = {"name": name}
+        if url:
+            partner["url"] = url
+        partners.append(partner)
+        seen.add(name)
+    return partners
+
+
+def _detect_partner_handoff(payload: object) -> list[dict[str, str]]:
+    text = _payload_text(payload)
     lower = text.casefold()
     if "choisissez le partenaire" not in lower and "site de meteojob" not in lower and "site de hellowork" not in lower:
         return []
-    partners = []
+    partners: list[dict[str, str]] = []
     for name in ("Meteojob", "HelloWork"):
-        if name.casefold() in lower:
-            partners.append(name)
+        name_lower = name.casefold()
+        if name_lower not in lower:
+            continue
+        url = ""
+        link_pattern = re.compile("href=[\\\"']([^\\\"']+)[\\\"'][^>]*>[^<]*(?:" + re.escape(name) + ")", re.I)
+        link_match = link_pattern.search(text)
+        if not link_match:
+            labelled_link_pattern = re.compile(
+                "<a\\b[^>]*href=[\\\"']([^\\\"']+)[\\\"'][^>]*>(?:(?!</a>).)*"
+                + re.escape(name)
+                + "(?:(?!</a>).)*</a>",
+                re.I | re.S,
+            )
+            link_match = labelled_link_pattern.search(text)
+        if link_match:
+            url = urljoin("https://candidat.francetravail.fr", html.unescape(link_match.group(1)))
+        partner = {"name": name}
+        if url:
+            partner["url"] = url
+        partners.append(partner)
     return partners
 
 
@@ -602,7 +679,7 @@ def apply_check_offer(
     url = _offer_url(offer)
     detail_active = stored_active
     has_apply_signal = False
-    partner_handoff: list[str] = []
+    partner_handoff: list[dict[str, str]] = []
     if url:
         client = _browser(browser)
         client.lifecycle_open(url, site=site, profile=profile)
@@ -610,17 +687,27 @@ def apply_check_offer(
         detail = extract_offer_detail(snapshot.payload)
         detail_active = detail.is_active
         has_apply_signal = detail.can_apply
-        partner_handoff = _detect_partner_handoff(detail.text)
+        partner_handoff = _detect_partner_handoff(snapshot.payload)
         if has_apply_signal and not partner_handoff and _expand_apply_options(client, site=site, profile=profile):
-            expanded_snapshot = client.snapshot(label=f"ft-apply-check-{offer_id}-expanded", site=site, profile=profile)
-            expanded_detail = extract_offer_detail(expanded_snapshot.payload)
-            expanded_partner_handoff = _detect_partner_handoff(expanded_detail.text)
-            if expanded_partner_handoff:
-                partner_handoff = expanded_partner_handoff
-                snapshot = expanded_snapshot
-                detail = expanded_detail
-                detail_active = expanded_detail.is_active
-                has_apply_signal = expanded_detail.can_apply
+            expanded_partner_handoff: list[dict[str, str]] = []
+            expanded_snapshot = snapshot
+            expanded_detail = detail
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(0.5)
+                expanded_snapshot = client.snapshot(label=f"ft-apply-check-{offer_id}-expanded", site=site, profile=profile)
+                expanded_detail = extract_offer_detail(expanded_snapshot.payload)
+                expanded_partner_handoff = _detect_partner_handoff(expanded_snapshot.payload)
+                dom_partner_handoff = _extract_partner_handoff_from_dom(client, site=site, profile=profile)
+                if dom_partner_handoff:
+                    expanded_partner_handoff = dom_partner_handoff
+                if expanded_partner_handoff:
+                    break
+            partner_handoff = expanded_partner_handoff
+            snapshot = expanded_snapshot
+            detail = expanded_detail
+            detail_active = expanded_detail.is_active
+            has_apply_signal = expanded_detail.can_apply
         conn.execute(
             """
             UPDATE offers
@@ -640,7 +727,8 @@ def apply_check_offer(
     else:
         reasons.append("Aucun signal de candidature détecté")
     if partner_handoff:
-        reasons.append(f"Partenaire(s) externe(s) détecté(s) : {', '.join(partner_handoff)}")
+        partner_names = [partner["name"] for partner in partner_handoff]
+        reasons.append(f"Partenaire(s) externe(s) détecté(s) : {', '.join(partner_names)}")
     can_apply = detail_active and not already_applied and has_apply_signal
     add_offer_event(
         conn,

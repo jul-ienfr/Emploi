@@ -355,20 +355,36 @@ def test_apply_check_reports_external_partner_handoff(tmp_path):
     browser = FakeBrowser(
         [
             {"text": "Postuler à l'offre"},
-            {"text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork"},
+            {
+                "text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork",
+                "html": """
+                <a href="https://www.meteojob.com/jobs/chauffeur-pl">Voir l'offre Chauffeur poids lourd sur le site de Meteojob</a>
+                <a href="https://www.hellowork.com/fr-fr/emplois/123.html">Voir l'offre Chauffeur poids lourd sur le site de HelloWork</a>
+                """,
+            },
         ],
-        console_values=[{"clicked": True}],
+        console_values=[
+            {"clicked": True},
+            [
+                {"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"},
+                {"name": "HelloWork", "url": "https://www.hellowork.com/fr-fr/emplois/123.html"},
+            ],
+        ],
     )
 
     result = apply_check_offer(conn, offer_id, browser=browser)
 
     assert result.can_apply is True
-    assert result.partner_handoff == ["Meteojob", "HelloWork"]
+    assert result.partner_handoff == [
+        {"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"},
+        {"name": "HelloWork", "url": "https://www.hellowork.com/fr-fr/emplois/123.html"},
+    ]
     assert any("Partenaire" in reason for reason in result.reasons)
     assert [command[0] for command in browser.commands].count("snapshot") == 2
     assert any(command[0] == "console_eval" and "postuler" in command[1] for command in browser.commands)
     events = list_offer_events(conn, offer_id)
-    assert '"partner_handoff": ["Meteojob", "HelloWork"]' in events[-1]["payload_json"]
+    assert '"name": "Meteojob"' in events[-1]["payload_json"]
+    assert '"url": "https://www.hellowork.com/fr-fr/emplois/123.html"' in events[-1]["payload_json"]
 
 
 def test_draft_application_creates_artifact_and_draft_row(tmp_path):
