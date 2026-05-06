@@ -66,6 +66,47 @@ def test_hellowork_apply_dry_run_cli_does_not_submit(monkeypatch, tmp_path):
     assert not any("postcandidateinformationfromstepframeview" in " ".join(call) for call in calls)
 
 
+def test_hellowork_apply_incomplete_form_returns_clean_error_without_submit(monkeypatch, tmp_path):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    calls: list[list[str]] = []
+
+    with connect(db_path) as conn:
+        init_db(conn)
+        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+
+    def fake_run(args, capture_output=True, text=True, check=False):
+        calls.append(args)
+        if args[1:3] == ["lifecycle", "open"]:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"success": True}), stderr="")
+        return _fake_completed(
+            {
+                "initialStatus": 200,
+                "funnelIdPresent": True,
+                "firstnamePresent": True,
+                "lastnamePresent": False,
+                "emailPresent": True,
+                "motivationPresent": True,
+                "submitButtonPresent": True,
+                "cvPresent": True,
+                "dissuasionRequired": False,
+                "dissuasionSkills": [],
+            }
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = CliRunner().invoke(app, ["hellowork", "apply", str(offer_id), "--submit"])
+
+    assert result.exit_code == 1
+    assert "Error: Formulaire HelloWork incomplet: Lastname" in result.stdout
+    assert "Traceback" not in result.output
+    assert "Invalid value" not in result.output
+    assert not any("postcandidateinformationfromstepframeview" in " ".join(call) for call in calls)
+    with connect(db_path) as conn:
+        assert list_offer_events(conn, offer_id) == []
+
+
 def test_hellowork_apply_submit_cli_records_sent_and_uses_configured_deck_stack(monkeypatch, tmp_path):
     config = reload_config(monkeypatch, tmp_path)
     db_path = tmp_path / "emploi.sqlite"
