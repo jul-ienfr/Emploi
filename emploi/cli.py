@@ -57,6 +57,7 @@ from emploi.france_travail.flows import (
     build_search_url,
     draft_application,
     open_offer,
+    open_partner_offer,
     refresh_offer,
     run_saved_search,
     search_offers,
@@ -1027,6 +1028,7 @@ def ft_apply(
     check: bool = typer.Option(False, "--check", help="Vérifier seulement la possibilité de candidater"),
     draft: bool = typer.Option(False, "--draft", help="Créer un brouillon local sans soumission"),
     open_browser: bool = typer.Option(False, "--open", help="Ouvrir l'offre dans le Managed Browser"),
+    partner: str | None = typer.Option(None, "--partner", help="Ouvrir le partenaire externe choisi (ex: Meteojob, HelloWork)"),
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
     site: str = typer.Option(DEFAULT_SITE, "--site"),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
@@ -1035,9 +1037,9 @@ def ft_apply(
     _ensure_option_enabled("france_travail.enabled")
     if draft:
         _ensure_option_enabled("drafts.enabled")
-    if check or open_browser or not any((check, draft, open_browser)):
+    if check or open_browser or partner or not any((check, draft, open_browser, partner)):
         _ensure_option_enabled("managed_browser.enabled")
-    if not any((check, draft, open_browser)):
+    if not any((check, draft, open_browser, partner)):
         check = True
     try:
         with connect() as conn:
@@ -1055,6 +1057,9 @@ def ft_apply(
             if open_browser:
                 url = open_offer(conn, offer_id, site=site, profile=profile)
                 console.print(f"Offre #{offer_id} ouverte : {url}")
+            if partner:
+                partner_result = open_partner_offer(conn, offer_id, partner, site=site, profile=profile)
+                console.print(f"Partenaire {partner_result.partner_name} ouvert pour l'offre #{offer_id} : {partner_result.url}")
     except ManagedBrowserError as error:
         _handle_browser_error(error)
     except ValueError as error:

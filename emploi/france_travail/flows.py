@@ -68,6 +68,13 @@ class DraftResult:
     draft_path: Path
 
 
+@dataclass(frozen=True)
+class PartnerOpenResult:
+    offer_id: int
+    partner_name: str
+    url: str
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -575,7 +582,11 @@ def _extract_partner_handoff_from_dom(browser: BrowserLike, *, site: str, profil
 })()
 """
     result = browser.console_eval(expression, site=site, profile=profile)
-    payload = result.payload.get("result") if isinstance(result.payload, dict) else None
+    payload = None
+    if isinstance(result.payload, dict):
+        payload = result.payload.get("value")
+        if payload is None:
+            payload = result.payload.get("result")
     if isinstance(payload, dict) and isinstance(payload.get("value"), list):
         payload = payload["value"]
     if not isinstance(payload, list):
@@ -688,7 +699,7 @@ def apply_check_offer(
         detail_active = detail.is_active
         has_apply_signal = detail.can_apply
         partner_handoff = _detect_partner_handoff(snapshot.payload)
-        if has_apply_signal and not partner_handoff and _expand_apply_options(client, site=site, profile=profile):
+        if has_apply_signal and not any(partner.get("url") for partner in partner_handoff) and _expand_apply_options(client, site=site, profile=profile):
             expanded_partner_handoff: list[dict[str, str]] = []
             expanded_snapshot = snapshot
             expanded_detail = detail
@@ -772,3 +783,37 @@ def open_offer(conn, offer_id: int, *, browser: BrowserLike | None = None, site:
     _browser(browser).lifecycle_open(url, site=site, profile=profile)
     add_offer_event(conn, offer_id, event_type="opened", message=url)
     return url
+
+
+def _partner_name_matches(candidate: str, requested: str) -> bool:
+    return candidate.casefold().replace(" ", "") == requested.casefold().replace(" ", "")
+
+
+def open_partner_offer(
+    conn,
+    offer_id: int,
+    partner: str,
+    *,
+    browser: BrowserLike | None = None,
+    site: str = DEFAULT_SITE,
+    profile: str = DEFAULT_PROFILE,
+) -> PartnerOpenResult:
+    result = apply_check_offer(conn, offer_id, browser=browser, site=site, profile=profile)
+    partners = result.partner_handoff or []
+    match = next((item for item in partners if _partner_name_matches(str(item.get("name") or ""), partner)), None)
+    if not match:
+        available = ", ".join(str(item.get("name") or "") for item in partners if item.get("name")) or "aucun"
+        raise ValueError(f"Partenaire introuvable pour l'offre #{offer_id}: {partner} (disponible(s): {available})")
+    url = str(match.get("url") or "")
+    if not url:
+        raise ValueError(f"URL partenaire introuvable pour l'offre #{offer_id}: {match.get('name')}")
+    _browser(browser).lifecycle_open(url, site=site, profile=profile)
+    partner_name = str(match.get("name") or partner)
+    add_offer_event(
+        conn,
+        offer_id,
+        event_type="partner_opened",
+        message=partner_name,
+        payload_json=json.dumps({"name": partner_name, "url": url}, ensure_ascii=False),
+    )
+    return PartnerOpenResult(offer_id=offer_id, partner_name=partner_name, url=url)

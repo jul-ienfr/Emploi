@@ -1,6 +1,14 @@
 from emploi.browser.models import BrowserCommandResult
 from emploi.db import add_application, add_offer, connect, get_offer, init_db, list_offer_events
-from emploi.france_travail.flows import apply_check_offer, build_search_url, draft_application, open_offer, refresh_offer, search_offers
+from emploi.france_travail.flows import (
+    apply_check_offer,
+    build_search_url,
+    draft_application,
+    open_offer,
+    open_partner_offer,
+    refresh_offer,
+    search_offers,
+)
 
 
 class FakeBrowser:
@@ -385,6 +393,41 @@ def test_apply_check_reports_external_partner_handoff(tmp_path):
     events = list_offer_events(conn, offer_id)
     assert '"name": "Meteojob"' in events[-1]["payload_json"]
     assert '"url": "https://www.hellowork.com/fr-fr/emplois/123.html"' in events[-1]["payload_json"]
+
+
+def test_open_partner_offer_opens_selected_partner_without_clicking_partner_link(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur poids lourd",
+        external_source="france-travail",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+    )
+    browser = FakeBrowser(
+        [
+            {"text": "Postuler à l'offre"},
+            {"text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork"},
+        ],
+        console_values=[
+            {"clicked": True},
+            [
+                {"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"},
+                {"name": "HelloWork", "url": "https://www.hellowork.com/fr-fr/emplois/123.html"},
+            ],
+        ],
+    )
+
+    result = open_partner_offer(conn, offer_id, "hellowork", browser=browser)
+
+    assert result.partner_name == "HelloWork"
+    assert result.url == "https://www.hellowork.com/fr-fr/emplois/123.html"
+    assert browser.opened[-1][0] == "https://www.hellowork.com/fr-fr/emplois/123.html"
+    assert browser.commands[-1][0] == "lifecycle_open"
+    assert not any(command[0] == "open" for command in browser.commands)
+    events = list_offer_events(conn, offer_id)
+    assert events[0]["event_type"] == "partner_opened"
+    assert '"name": "HelloWork"' in events[0]["payload_json"]
 
 
 def test_draft_application_creates_artifact_and_draft_row(tmp_path):
