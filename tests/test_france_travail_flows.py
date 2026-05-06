@@ -430,6 +430,66 @@ def test_open_partner_offer_opens_selected_partner_without_clicking_partner_link
     assert '"name": "HelloWork"' in events[0]["payload_json"]
 
 
+def test_open_partner_offer_reports_missing_partner_without_opening_external_url(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur poids lourd",
+        external_source="france-travail",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+    )
+    browser = FakeBrowser(
+        [
+            {"text": "Postuler à l'offre"},
+            {"text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork"},
+        ],
+        console_values=[
+            {"clicked": True},
+            [{"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"}],
+        ],
+    )
+
+    try:
+        open_partner_offer(conn, offer_id, "hellowork", browser=browser)
+    except ValueError as error:
+        message = str(error)
+    else:  # pragma: no cover
+        raise AssertionError("missing partner should fail")
+
+    assert "Partenaire introuvable" in message
+    assert "disponible(s): Meteojob" in message
+    assert browser.opened == [("https://candidat.francetravail.fr/offres/recherche/detail/ABC123", "france-travail", "emploi-candidature")]
+    assert all(command[0] != "open" for command in browser.commands)
+    events = list_offer_events(conn, offer_id)
+    assert all(event["event_type"] != "partner_opened" for event in events)
+
+
+def test_open_partner_offer_reports_missing_partner_url_without_external_open(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur poids lourd",
+        external_source="france-travail",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+    )
+    browser = FakeBrowser([{"text": "Choisissez le partenaire de votre choix : Meteojob HelloWork"}])
+
+    try:
+        open_partner_offer(conn, offer_id, "hellowork", browser=browser)
+    except ValueError as error:
+        message = str(error)
+    else:  # pragma: no cover
+        raise AssertionError("missing partner URL should fail")
+
+    assert "URL partenaire introuvable" in message
+    assert "HelloWork" in message
+    assert browser.opened == [("https://candidat.francetravail.fr/offres/recherche/detail/ABC123", "france-travail", "emploi-candidature")]
+    events = list_offer_events(conn, offer_id)
+    assert all(event["event_type"] != "partner_opened" for event in events)
+
+
 def test_draft_application_creates_artifact_and_draft_row(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
