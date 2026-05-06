@@ -541,13 +541,45 @@ def _has_submitted_application(conn, offer_id: int) -> bool:
 
 def _detect_partner_handoff(text: str) -> list[str]:
     lower = text.casefold()
-    if "choisissez le partenaire" not in lower:
+    if "choisissez le partenaire" not in lower and "site de meteojob" not in lower and "site de hellowork" not in lower:
         return []
     partners = []
     for name in ("Meteojob", "HelloWork"):
         if name.casefold() in lower:
             partners.append(name)
     return partners
+
+
+def _expand_apply_options(browser: BrowserLike, *, site: str, profile: str) -> bool:
+    if not hasattr(browser, "console_eval"):
+        return False
+    expression = r"""
+(() => {
+  const labels = ["postuler à l'offre", "postuler", "candidater"];
+  const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+  const target = candidates.find((el) => {
+    const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase();
+    return labels.some((label) => text.includes(label));
+  });
+  if (!target) return {clicked: false, reason: 'apply button not found'};
+  target.click();
+  return {clicked: true};
+})()
+""".strip()
+    try:
+        result = browser.console_eval(expression, site=site, profile=profile)  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    value = result.payload.get("value") if isinstance(result.payload, dict) else None
+    if isinstance(value, dict):
+        return bool(value.get("clicked"))
+    nested = result.payload.get("result") if isinstance(result.payload, dict) else None
+    if isinstance(nested, dict):
+        if "clicked" in nested:
+            return bool(nested.get("clicked"))
+        if isinstance(nested.get("value"), dict):
+            return bool(nested["value"].get("clicked"))
+    return False
 
 
 def apply_check_offer(
@@ -579,6 +611,16 @@ def apply_check_offer(
         detail_active = detail.is_active
         has_apply_signal = detail.can_apply
         partner_handoff = _detect_partner_handoff(detail.text)
+        if has_apply_signal and not partner_handoff and _expand_apply_options(client, site=site, profile=profile):
+            expanded_snapshot = client.snapshot(label=f"ft-apply-check-{offer_id}-expanded", site=site, profile=profile)
+            expanded_detail = extract_offer_detail(expanded_snapshot.payload)
+            expanded_partner_handoff = _detect_partner_handoff(expanded_detail.text)
+            if expanded_partner_handoff:
+                partner_handoff = expanded_partner_handoff
+                snapshot = expanded_snapshot
+                detail = expanded_detail
+                detail_active = expanded_detail.is_active
+                has_apply_signal = expanded_detail.can_apply
         conn.execute(
             """
             UPDATE offers

@@ -21,10 +21,12 @@ class FakeBrowser:
         return BrowserCommandResult("lifecycle_open", site, profile, {"ok": True, "url": url})
 
     def snapshot(self, *, label=None, site="france-travail", profile="emploi"):
+        self.commands.append(("snapshot", label, site, profile))
         payload = self.snapshots.pop(0)
         return BrowserCommandResult("snapshot", site, profile, payload)
 
     def console_eval(self, expression, *, site="france-travail", profile="emploi"):
+        self.commands.append(("console_eval", expression, site, profile))
         return BrowserCommandResult("console_eval", site, profile, {"value": self.console_values.pop(0)})
 
 
@@ -350,17 +352,21 @@ def test_apply_check_reports_external_partner_handoff(tmp_path):
         external_source="france-travail",
         browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
     )
-    browser = FakeBrowser([
-        {
-            "text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork",
-        }
-    ])
+    browser = FakeBrowser(
+        [
+            {"text": "Postuler à l'offre"},
+            {"text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork"},
+        ],
+        console_values=[{"clicked": True}],
+    )
 
     result = apply_check_offer(conn, offer_id, browser=browser)
 
     assert result.can_apply is True
     assert result.partner_handoff == ["Meteojob", "HelloWork"]
     assert any("Partenaire" in reason for reason in result.reasons)
+    assert [command[0] for command in browser.commands].count("snapshot") == 2
+    assert any(command[0] == "console_eval" and "postuler" in command[1] for command in browser.commands)
     events = list_offer_events(conn, offer_id)
     assert '"partner_handoff": ["Meteojob", "HelloWork"]' in events[-1]["payload_json"]
 
