@@ -17,7 +17,7 @@ def test_browser_status_prints_json(monkeypatch):
             'profile',
             'status',
             '--profile',
-            'emploi',
+            'emploi-candidature',
             '--site',
             'france-travail',
             '--json',
@@ -91,7 +91,7 @@ def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
         'managed-browser',
         'snapshot',
         '--profile',
-        'emploi',
+        'emploi-candidature',
         '--site',
         'france-travail',
         '--json',
@@ -101,7 +101,7 @@ def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
         'storage',
         'checkpoint',
         '--profile',
-        'emploi',
+        'emploi-candidature',
         '--site',
         'france-travail',
         '--reason',
@@ -145,7 +145,7 @@ def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
     payload = json.loads(result.stdout)
     assert payload['status'] == 'ok'
     assert payload['site'] == 'france-travail'
-    assert payload['profile'] == 'emploi'
+    assert payload['profile'] == 'emploi-candidature'
     assert payload['checks']['status']['payload']['state'] == 'ready'
     assert payload['checks']['snapshot']['payload']['text'] == 'France Travail'
     assert [call[1:3] for call in calls] == [['profile', 'status'], ['snapshot', '--profile']]

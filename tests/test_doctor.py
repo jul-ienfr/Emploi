@@ -43,6 +43,12 @@ def test_doctor_json_reports_healthy_browser_when_status_probe_succeeds(tmp_path
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("EMPLOI_DB", str(tmp_path / "emploi.sqlite"))
     monkeypatch.setenv("EMPLOI_MANAGED_BROWSER_COMMAND", "managed-browser")
+    accounts_dir = tmp_path / "config" / "emploi"
+    accounts_dir.mkdir(parents=True)
+    (accounts_dir / "accounts.json").write_text(
+        json.dumps({"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"})
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
     result = runner.invoke(app, ["doctor", "--json"])
 
@@ -65,6 +71,12 @@ def test_doctor_json_reports_browser_probe_error(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("EMPLOI_DB", str(tmp_path / "emploi.sqlite"))
     monkeypatch.setenv("EMPLOI_MANAGED_BROWSER_COMMAND", "managed-browser")
+    accounts_dir = tmp_path / "config" / "emploi"
+    accounts_dir.mkdir(parents=True)
+    (accounts_dir / "accounts.json").write_text(
+        json.dumps({"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"})
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
     result = runner.invoke(app, ["doctor", "--json"])
 

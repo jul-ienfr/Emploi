@@ -132,17 +132,24 @@ emploi report
 
 `emploi brief` est le briefing quotidien Julien : meilleures offres, actions prioritaires, relances dues, candidatures envoyées sans contact récent, blockers et stats 7 jours. Utiliser `emploi brief --json` quand un agent doit parser le résultat : la sortie doit rester du JSON pur, sans bruit Rich.
 
-### Candidatures et pilotage opérateur
-
+### Candidatures, documents Nextcloud et pilotage opérateur
 ```bash
 emploi apply 1
 emploi application draft 1
 emploi application list
 emploi application followup 1 2026-05-04
+emploi document-profile set poids-lourd --cv PATH --cover-letter PATH --default
+emploi nextcloud-files set emploi --base-url URL --remote-root /Emploi --username-pass nextcloud/username --password-pass nextcloud/password --default
+emploi kanban set chauffeur-pl --base-url URL --board-id BOARD_ID --username-pass nextcloud/username --password-pass nextcloud/password
+emploi application export 1 --to-nextcloud --dry-run --include-documents --document-profile poids-lourd
+emploi kanban card add-offer 1 --endpoint chauffeur-pl --stack-id STACK_ID --dry-run
+emploi application pipeline 1 --files-endpoint emploi --kanban-endpoint chauffeur-pl --stack-id STACK_ID --dry-run
 emploi brief
 emploi next
 emploi report
 ```
+
+Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, WebDAV/Files pour les dossiers candidature. Les credentials restent dans `pass`; les fichiers de config locaux stockent seulement les noms d'entrées `pass`, jamais les secrets. Utiliser `--dry-run` avant tout upload WebDAV ou création de carte Deck live. `application pipeline` orchestre export Files + carte Deck et réutilise l'event `nextcloud_deck_card` existant sauf `--force-card`.
 
 ## Workflow agent recommandé
 
