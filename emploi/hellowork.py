@@ -319,6 +319,30 @@ def _create_sent_deck_card(
     return create_offer_card(conn, offer_id, endpoint=endpoint, stack_id=stack_id, dry_run=dry_run)
 
 
+def _record_sent_application(conn, offer_id: int, *, notes: str) -> int:
+    existing = conn.execute(
+        """
+        SELECT id FROM applications
+        WHERE offer_id = ? AND status = 'draft'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (offer_id,),
+    ).fetchone()
+    if existing is not None:
+        application_id = int(existing["id"])
+        conn.execute(
+            "UPDATE applications SET status = ?, last_contact_at = CURRENT_TIMESTAMP, notes = ? WHERE id = ?",
+            ("sent", notes, application_id),
+        )
+        update_offer_status(conn, offer_id, "sent")
+        conn.commit()
+        return application_id
+    application_id = add_application(conn, offer_id, status="sent", notes=notes)
+    update_offer_status(conn, offer_id, "sent")
+    return application_id
+
+
 def apply_hellowork(
     conn,
     offer_id: int,
@@ -396,8 +420,7 @@ def apply_hellowork(
     )
     if not data.get("confirmed"):
         raise ValueError("Confirmation HelloWork non détectée après soumission")
-    application_id = add_application(conn, offer_id, status="sent", notes="Candidature envoyée via HelloWork")
-    update_offer_status(conn, offer_id, "sent")
+    application_id = _record_sent_application(conn, offer_id, notes="Candidature envoyée via HelloWork")
     add_offer_event(
         conn,
         offer_id,

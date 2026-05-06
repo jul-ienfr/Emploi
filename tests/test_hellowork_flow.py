@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from emploi.db import add_offer, connect, get_offer, init_db, list_applications, list_offer_events
+from emploi.db import add_offer, connect, get_offer, init_db, list_applications, list_offer_events, upsert_draft_application
 from emploi.hellowork import apply_hellowork, inspect_hellowork_form
 
 
@@ -103,6 +103,33 @@ def test_apply_hellowork_dry_run_records_preview_without_submission_or_applicati
     assert payload["submit_application"] is False
     assert "FunnelId" not in events[0]["payload_json"]
     assert not any("postcandidateinformationfromstepframeview" in expr for expr in browser.expressions)
+
+
+def test_apply_hellowork_submit_does_not_duplicate_existing_draft_application(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    draft_id = upsert_draft_application(conn, offer_id, draft_path="/tmp/draft.md")
+    browser = FakeBrowser()
+
+    result = apply_hellowork(
+        conn,
+        offer_id,
+        browser=browser,
+        submit=True,
+        site="france-travail",
+        profile="emploi-candidature",
+        kanban=False,
+    )
+
+    assert result.submitted is True
+    assert result.application_id == draft_id
+    applications = list_applications(conn)
+    assert len(applications) == 1
+    assert applications[0]["id"] == draft_id
+    assert applications[0]["status"] == "sent"
+    assert applications[0]["draft_path"] == "/tmp/draft.md"
+    assert get_offer(conn, offer_id)["status"] == "sent"
 
 
 def test_apply_hellowork_submit_records_application_and_deck_card(tmp_path):
