@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from emploi.db import add_offer, connect, init_db, list_applications, list_offer_events
+from emploi.db import add_offer, connect, get_offer, init_db, list_applications, list_offer_events
 from emploi.hellowork import apply_hellowork, inspect_hellowork_form
 
 
@@ -126,6 +126,7 @@ def test_apply_hellowork_submit_records_application_and_deck_card(tmp_path):
     applications = list_applications(conn)
     assert len(applications) == 1
     assert applications[0]["status"] == "sent"
+    assert get_offer(conn, offer_id)["status"] == "sent"
     events = list_offer_events(conn, offer_id)
     assert events[0]["event_type"] == "application_submitted"
     payload = json.loads(events[0]["payload_json"])
