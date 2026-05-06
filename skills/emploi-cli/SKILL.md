@@ -83,9 +83,10 @@ emploi ft refresh 1
 emploi ft apply 1 --check
 emploi ft apply 1 --draft
 emploi ft apply 1 --open
+emploi ft apply 1 --partner hellowork
 ```
 
-Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` pour vérifier, `--draft` pour préparer, `--open` pour ouvrir dans le navigateur managé.
+Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` pour vérifier, `--draft` pour préparer, `--open` pour ouvrir l'offre France Travail dans le navigateur managé, ou `--partner NOM` pour ouvrir explicitement un partenaire externe détecté (ex. Meteojob/HelloWork) après handoff structuré. `--partner` ouvre seulement l'URL partenaire choisie via Managed Browser; il ne clique pas les liens de candidature finale et ne soumet rien.
 
 ### Options opérateur globales
 
@@ -177,7 +178,8 @@ Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, 
 4. Pour une candidature assistée :
    - utiliser d'abord `emploi ft apply <id> --check` ;
    - puis éventuellement `emploi application draft <id>` ou `emploi ft apply <id> --draft` ;
-   - ouvrir manuellement avec `emploi ft apply <id> --open` si Julien veut finaliser ;
+   - ouvrir manuellement avec `emploi ft apply <id> --open` si Julien veut finaliser côté France Travail ;
+   - si le check expose un handoff partenaire, utiliser seulement sur demande explicite `emploi ft apply <id> --partner hellowork|meteojob` pour ouvrir ce partenaire choisi ;
    - ne jamais cliquer/soumettre automatiquement une candidature réelle sans validation explicite.
 5. Pour modifier le CLI : suivre TDD strict, puis :
    ```bash

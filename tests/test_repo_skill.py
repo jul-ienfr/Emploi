@@ -12,6 +12,7 @@ def test_repo_contains_hermes_skill_for_emploi_cli():
     assert "emploi doctor --json" in content
     assert "emploi search-profile run --all" in content
     assert "emploi ft apply" in content
+    assert "emploi ft apply 1 --partner hellowork" in content
     assert "ne soumet jamais automatiquement" in content
 
 
