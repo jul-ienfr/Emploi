@@ -341,6 +341,30 @@ def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(
     assert any("inactive" in reason.lower() for reason in inactive.reasons)
 
 
+def test_apply_check_reports_external_partner_handoff(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Chauffeur poids lourd",
+        external_source="france-travail",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+    )
+    browser = FakeBrowser([
+        {
+            "text": "Postuler à l'offre. Choisissez le partenaire de votre choix : Meteojob HelloWork",
+        }
+    ])
+
+    result = apply_check_offer(conn, offer_id, browser=browser)
+
+    assert result.can_apply is True
+    assert result.partner_handoff == ["Meteojob", "HelloWork"]
+    assert any("Partenaire" in reason for reason in result.reasons)
+    events = list_offer_events(conn, offer_id)
+    assert '"partner_handoff": ["Meteojob", "HelloWork"]' in events[-1]["payload_json"]
+
+
 def test_draft_application_creates_artifact_and_draft_row(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)

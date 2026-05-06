@@ -57,6 +57,7 @@ class ApplyCheckResult:
     has_apply_signal: bool
     reasons: list[str]
     browser_url: str
+    partner_handoff: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -538,6 +539,17 @@ def _has_submitted_application(conn, offer_id: int) -> bool:
     return any(status not in draft_like for status in _application_statuses(conn, offer_id))
 
 
+def _detect_partner_handoff(text: str) -> list[str]:
+    lower = text.casefold()
+    if "choisissez le partenaire" not in lower:
+        return []
+    partners = []
+    for name in ("Meteojob", "HelloWork"):
+        if name.casefold() in lower:
+            partners.append(name)
+    return partners
+
+
 def apply_check_offer(
     conn,
     offer_id: int,
@@ -558,6 +570,7 @@ def apply_check_offer(
     url = _offer_url(offer)
     detail_active = stored_active
     has_apply_signal = False
+    partner_handoff: list[str] = []
     if url:
         client = _browser(browser)
         client.lifecycle_open(url, site=site, profile=profile)
@@ -565,6 +578,7 @@ def apply_check_offer(
         detail = extract_offer_detail(snapshot.payload)
         detail_active = detail.is_active
         has_apply_signal = detail.can_apply
+        partner_handoff = _detect_partner_handoff(detail.text)
         conn.execute(
             """
             UPDATE offers
@@ -583,15 +597,29 @@ def apply_check_offer(
         reasons.append("Signal de candidature détecté")
     else:
         reasons.append("Aucun signal de candidature détecté")
+    if partner_handoff:
+        reasons.append(f"Partenaire(s) externe(s) détecté(s) : {', '.join(partner_handoff)}")
     can_apply = detail_active and not already_applied and has_apply_signal
     add_offer_event(
         conn,
         offer_id,
         event_type="apply_check",
         message="Candidature possible" if can_apply else "Candidature non disponible",
-        payload_json=json.dumps({"can_apply": can_apply, "reasons": reasons}, ensure_ascii=False),
+        payload_json=json.dumps(
+            {"can_apply": can_apply, "reasons": reasons, "partner_handoff": partner_handoff},
+            ensure_ascii=False,
+        ),
     )
-    return ApplyCheckResult(offer_id, can_apply, detail_active, already_applied, has_apply_signal, reasons, url)
+    return ApplyCheckResult(
+        offer_id,
+        can_apply,
+        detail_active,
+        already_applied,
+        has_apply_signal,
+        reasons,
+        url,
+        partner_handoff or None,
+    )
 
 
 def _safe_slug(value: str) -> str:
