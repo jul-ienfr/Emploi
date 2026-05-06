@@ -18,6 +18,7 @@ def test_set_nextcloud_deck_kanban_endpoint_roundtrip(tmp_path, monkeypatch):
         username_pass="nextcloud/username",
         password_pass="nextcloud/password",
         title="Recherche Emploi - CDI Conducteur SPL",
+        stacks={"a-postuler": 50, "urgent": 49},
     )
 
     assert saved["name"] == "recherche-emploi"
@@ -28,6 +29,9 @@ def test_set_nextcloud_deck_kanban_endpoint_roundtrip(tmp_path, monkeypatch):
     assert saved["api_stacks_url"] == "https://nextcloud.test/index.php/apps/deck/api/v1.0/boards/17/stacks"
     assert saved["username_pass"] == "nextcloud/username"
     assert saved["password_pass"] == "nextcloud/password"
+    assert saved["stacks"] == {"a-postuler": 50, "urgent": 49}
+    assert config.resolve_kanban_stack(saved, "a-postuler") == 50
+    assert config.resolve_kanban_stack(saved, "50") == 50
 
     loaded = config.get_kanban_endpoint("recherche-emploi")
     assert loaded == saved
@@ -55,6 +59,10 @@ def test_kanban_cli_set_and_show_json(tmp_path, monkeypatch):
             "nextcloud/password",
             "--title",
             "Recherche Emploi - CDI Conducteur SPL",
+            "--stack",
+            "a-postuler=50",
+            "--stack",
+            "urgent=49",
             "--default",
         ],
     )
@@ -65,6 +73,7 @@ def test_kanban_cli_set_and_show_json(tmp_path, monkeypatch):
     assert show.exit_code == 0, show.stdout
     assert '"board_id": 17' in show.stdout
     assert '"api_stacks_url": "https://nextcloud.test/index.php/apps/deck/api/v1.0/boards/17/stacks"' in show.stdout
+    assert '"a-postuler": 50' in show.stdout
 
 
 def test_kanban_cli_requires_explicit_default_when_ambiguous(tmp_path, monkeypatch):

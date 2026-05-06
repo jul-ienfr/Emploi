@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import typer
 from pathlib import Path
+from typing import Annotated
 
 from rich.console import Console
 from rich.table import Table
@@ -186,10 +187,12 @@ def kanban_set(
     password_pass: str = typer.Option("", "--password-pass", help="Entrée pass contenant le mot de passe/app password"),
     title: str = typer.Option("", "--title", help="Titre lisible du board"),
     api_base_path: str = typer.Option("/index.php/apps/deck/api/v1.0", "--api-base-path", help="Chemin API Deck"),
+    stack_options: Annotated[list[str] | None, typer.Option("--stack", help="Alias de colonne Deck au format alias=ID; répétable")] = None,
     make_default: bool = typer.Option(False, "--default", help="Définir comme endpoint kanban par défaut"),
 ) -> None:
     """Enregistre un endpoint API Nextcloud Deck pour le suivi kanban emploi."""
     try:
+        stacks = emploi_config.parse_kanban_stack_options(stack_options)
         endpoint = emploi_config.set_kanban_endpoint(
             name,
             base_url=base_url,
@@ -200,6 +203,7 @@ def kanban_set(
             title=title,
             api_base_path=api_base_path,
             make_default=make_default,
+            stacks=stacks,
         )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
@@ -207,6 +211,8 @@ def kanban_set(
     console.print(f"Kanban enregistré : {endpoint['name']}{marker}")
     console.print(f"UI  : {endpoint['board_url']}")
     console.print(f"API : {endpoint['api_stacks_url']}")
+    if endpoint.get("stacks"):
+        console.print(f"Stacks: {', '.join(f'{alias}={stack_id}' for alias, stack_id in endpoint['stacks'].items())}")
     if endpoint.get("username_pass") or endpoint.get("password_pass"):
         console.print("Auth: pass (secrets non affichés)")
 
@@ -235,6 +241,8 @@ def kanban_show(
     console.print(f"Board  : {endpoint['board_url']}")
     console.print(f"API board  : {endpoint['api_board_url']}")
     console.print(f"API stacks : {endpoint['api_stacks_url']}")
+    if endpoint.get("stacks"):
+        console.print(f"Stacks : {', '.join(f'{alias}={stack_id}' for alias, stack_id in endpoint['stacks'].items())}")
     if endpoint.get("username_pass") or endpoint.get("password_pass"):
         console.print("Auth pass : configurée")
 
@@ -258,7 +266,7 @@ def kanban_list(json_output: bool = typer.Option(False, "--json", help="Afficher
 @kanban_card_app.command("add-offer")
 def kanban_card_add_offer(
     offer_id: int,
-    stack_id: int = typer.Option(..., "--stack-id", help="ID de la colonne/stack Deck cible"),
+    stack: str = typer.Option(..., "--stack", "--stack-id", help="Alias ou ID de la colonne/stack Deck cible"),
     endpoint_name: str = typer.Option("", "--endpoint", help="Endpoint kanban; vide = défaut"),
     nextcloud_folder_url: str = typer.Option("", "--nextcloud-folder-url", help="Lien dossier Nextcloud à ajouter à la description"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans créer de carte"),
@@ -269,6 +277,7 @@ def kanban_card_add_offer(
     if endpoint is None:
         raise typer.BadParameter("Aucun endpoint kanban configuré. Utilise `emploi kanban set ...`.")
     try:
+        stack_id = emploi_config.resolve_kanban_stack(endpoint, stack)
         with connect() as conn:
             init_db(conn)
             result = create_offer_card(
@@ -1311,7 +1320,7 @@ def application_export(
 @application_app.command("pipeline")
 def application_pipeline(
     offer_id: int,
-    stack_id: int = typer.Option(..., "--stack-id", help="ID de la colonne/stack Deck cible"),
+    stack: str = typer.Option(..., "--stack", "--stack-id", help="Alias ou ID de la colonne/stack Deck cible"),
     files_endpoint_name: str = typer.Option("", "--files-endpoint", help="Endpoint nextcloud-files; vide = défaut"),
     kanban_endpoint_name: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans upload ni création de carte"),
@@ -1338,6 +1347,7 @@ def application_pipeline(
         raise typer.BadParameter("Aucun endpoint kanban configuré. Utilise `emploi kanban set ...`.")
     document_profile = _resolve_nextcloud_document_profile(include_documents, document_profile_name)
     try:
+        stack_id = emploi_config.resolve_kanban_stack(kanban_endpoint, stack)
         with connect() as conn:
             init_db(conn)
             export_result = export_application_to_nextcloud(

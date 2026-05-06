@@ -23,6 +23,7 @@ def configure_endpoints(config):
         username_pass="nextcloud/username",
         password_pass="nextcloud/password",
         make_default=True,
+        stacks={"a-postuler": 49},
     )
 
 
@@ -37,7 +38,7 @@ def test_application_pipeline_dry_run_previews_files_and_deck_without_events(mon
 
     result = CliRunner().invoke(
         app,
-        ["application", "pipeline", str(offer_id), "--stack-id", "49", "--dry-run"],
+        ["application", "pipeline", str(offer_id), "--stack", "a-postuler", "--dry-run"],
     )
 
     assert result.exit_code == 0, result.output
@@ -61,7 +62,7 @@ def test_application_pipeline_live_reuses_existing_card_event_without_new_card(m
 
     result = CliRunner().invoke(
         app,
-        ["application", "pipeline", str(offer_id), "--stack-id", "49", "--dry-run"],
+        ["application", "pipeline", str(offer_id), "--stack", "a-postuler", "--dry-run"],
     )
 
     assert result.exit_code == 0, result.output

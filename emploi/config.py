@@ -221,15 +221,65 @@ def _load_kanban_endpoints_payload() -> dict[str, Any]:
     return {"default": default, "endpoints": endpoints}
 
 
+def _normalize_stack_aliases(raw_stacks: Any) -> dict[str, int]:
+    if not isinstance(raw_stacks, dict):
+        return {}
+    stacks: dict[str, int] = {}
+    for alias, stack_id in raw_stacks.items():
+        key = str(alias or "").strip()
+        if not key:
+            continue
+        try:
+            stacks[key] = int(stack_id)
+        except (TypeError, ValueError):
+            continue
+    return stacks
+
+
+def resolve_kanban_stack(endpoint: dict[str, Any], stack: str | int) -> int:
+    """Resolve a Deck stack from a numeric ID or configured endpoint alias."""
+    if isinstance(stack, int):
+        return stack
+    value = str(stack or "").strip()
+    if not value:
+        raise ValueError("Stack kanban obligatoire")
+    if value.isdigit():
+        return int(value)
+    stacks = _normalize_stack_aliases(endpoint.get("stacks"))
+    if value in stacks:
+        return stacks[value]
+    raise ValueError(f"Stack kanban inconnue: {value}")
+
+
+def parse_kanban_stack_options(values: list[str] | tuple[str, ...] | None) -> dict[str, int]:
+    stacks: dict[str, int] = {}
+    for value in values or []:
+        item = str(value or "").strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError("Format stack attendu: alias=ID")
+        alias, raw_stack_id = item.split("=", 1)
+        alias = alias.strip()
+        if not alias:
+            raise ValueError("Alias stack obligatoire")
+        try:
+            stacks[alias] = int(raw_stack_id.strip())
+        except ValueError as error:
+            raise ValueError(f"ID stack invalide pour {alias}: {raw_stack_id}") from error
+    return stacks
+
+
 def _normalize_kanban_endpoint(name: str, raw: dict[str, Any], *, default_name: str = "") -> dict[str, Any]:
     base_url = str(raw.get("base_url", "") or "").rstrip("/")
-    board_id = int(raw.get("board_id", 0) or 0)
     api_base_path = str(raw.get("api_base_path", "/index.php/apps/deck/api/v1.0") or "/index.php/apps/deck/api/v1.0")
     if not api_base_path.startswith("/"):
         api_base_path = "/" + api_base_path
-    board_url = str(raw.get("board_url", "") or "") or (f"{base_url}/apps/deck/board/{board_id}" if base_url and board_id else "")
-    api_base_url = f"{base_url}{api_base_path}" if base_url else ""
-    api_board_url = f"{api_base_url}/boards/{board_id}" if api_base_url and board_id else ""
+    board_id = int(raw.get("board_id", 0) or 0)
+    board_url = str(raw.get("board_url", "") or "")
+    if not board_url and base_url and board_id:
+        board_url = f"{base_url}/apps/deck/board/{board_id}"
+    api_board_url = f"{base_url}{api_base_path}/boards/{board_id}" if base_url and board_id else ""
     return {
         "name": name,
         "title": str(raw.get("title", "") or ""),
@@ -241,9 +291,9 @@ def _normalize_kanban_endpoint(name: str, raw: dict[str, Any], *, default_name: 
         "api_stacks_url": f"{api_board_url}/stacks" if api_board_url else "",
         "username_pass": str(raw.get("username_pass", "") or ""),
         "password_pass": str(raw.get("password_pass", "") or ""),
+        "stacks": _normalize_stack_aliases(raw.get("stacks")),
         "default": "✓" if name == default_name else "",
     }
-
 
 def list_kanban_endpoints() -> list[dict[str, Any]]:
     data = _load_kanban_endpoints_payload()
@@ -286,6 +336,7 @@ def set_kanban_endpoint(
     title: str = "",
     api_base_path: str = "/index.php/apps/deck/api/v1.0",
     make_default: bool = False,
+    stacks: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     normalized_name = name.strip()
     if not normalized_name:
@@ -304,6 +355,7 @@ def set_kanban_endpoint(
         "api_base_path": api_base_path,
         "username_pass": username_pass,
         "password_pass": password_pass,
+        "stacks": _normalize_stack_aliases(stacks),
     }
     endpoints[normalized_name] = endpoint
     default = normalized_name if make_default or not data.get("default") else str(data.get("default", "") or "")
