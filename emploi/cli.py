@@ -28,6 +28,7 @@ from emploi.db import (
     db_path,
     get_auto_followup_config,
     get_boolean_option,
+    get_followup_sync_config,
     get_offer,
     validate_option_key,
     get_option,
@@ -44,6 +45,7 @@ from emploi.db import (
     schedule_application_followup,
     set_auto_followup_config,
     set_boolean_option,
+    set_followup_sync_config,
     set_saved_search_enabled,
     toggle_boolean_option,
     update_application_status,
@@ -62,6 +64,7 @@ from emploi.france_travail.flows import (
 from emploi.importers import import_offers_file
 from emploi.nextcloud_deck import create_offer_card
 from emploi.nextcloud_files import export_application_to_nextcloud
+from emploi.nextcloud_tasks import create_followup_task, sync_due_followup_tasks
 
 app = typer.Typer(help="CLI personnel pour chercher, scorer et suivre les offres d'emploi.")
 offer_app = typer.Typer(help="Gestion des offres")
@@ -76,6 +79,7 @@ document_profile_app = typer.Typer(help="Profils documents emploi: CV et lettres
 kanban_app = typer.Typer(help="Endpoint kanban externe pour le suivi recherche emploi")
 kanban_card_app = typer.Typer(help="Cartes Deck liées aux offres")
 nextcloud_files_app = typer.Typer(help="Endpoint Nextcloud Files/WebDAV pour les documents emploi")
+nextcloud_tasks_app = typer.Typer(help="Endpoint Nextcloud Tasks/CalDAV pour les relances emploi")
 app.add_typer(offer_app, name="offer")
 app.add_typer(application_app, name="application")
 app.add_typer(browser_app, name="browser")
@@ -88,6 +92,7 @@ app.add_typer(document_profile_app, name="document-profile")
 kanban_app.add_typer(kanban_card_app, name="card")
 app.add_typer(kanban_app, name="kanban")
 app.add_typer(nextcloud_files_app, name="nextcloud-files")
+app.add_typer(nextcloud_tasks_app, name="nextcloud-tasks")
 console = Console(soft_wrap=True)
 
 
@@ -375,6 +380,78 @@ def nextcloud_files_list(json_output: bool = typer.Option(False, "--json", help=
     table = Table("Nom", "Défaut", "Racine", "WebDAV")
     for endpoint in endpoints:
         table.add_row(endpoint["name"], endpoint.get("default", ""), endpoint["remote_root"], endpoint["webdav_root_url"])
+    console.print(table)
+
+
+@nextcloud_tasks_app.command("set")
+def nextcloud_tasks_set(
+    name: str,
+    base_url: str = typer.Option(..., "--base-url", help="URL racine Nextcloud"),
+    calendar: str = typer.Option("tasks", "--calendar", help="Nom du calendrier/liste Tasks CalDAV"),
+    username_pass: str = typer.Option("", "--username-pass", help="Entrée pass contenant le login"),
+    password_pass: str = typer.Option("", "--password-pass", help="Entrée pass contenant le mot de passe/app password"),
+    caldav_base_path: str = typer.Option("/remote.php/dav/calendars", "--caldav-base-path", help="Chemin CalDAV Nextcloud"),
+    make_default: bool = typer.Option(False, "--default", help="Définir comme endpoint Tasks par défaut"),
+) -> None:
+    """Enregistre un endpoint Nextcloud Tasks/CalDAV pour les relances emploi."""
+    try:
+        endpoint = emploi_config.set_nextcloud_tasks_endpoint(
+            name,
+            base_url=base_url,
+            calendar=calendar,
+            username_pass=username_pass,
+            password_pass=password_pass,
+            caldav_base_path=caldav_base_path,
+            make_default=make_default,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    marker = " (défaut)" if endpoint.get("default") else ""
+    console.print(f"Nextcloud Tasks enregistré : {endpoint['name']}{marker}")
+    console.print(f"Calendrier : {endpoint['calendar']}")
+    console.print(f"CalDAV : {endpoint['calendar_home_url']}")
+    if endpoint.get("username_pass") or endpoint.get("password_pass"):
+        console.print("Auth: pass (secrets non affichés)")
+
+
+@nextcloud_tasks_app.command("show")
+def nextcloud_tasks_show(
+    name: str = typer.Argument("", help="Nom de l'endpoint; vide = défaut"),
+    json_output: bool = typer.Option(False, "--json", help="Afficher en JSON"),
+) -> None:
+    """Affiche l'endpoint Nextcloud Tasks/CalDAV configuré."""
+    endpoint = emploi_config.get_nextcloud_tasks_endpoint(name) if name else emploi_config.get_default_nextcloud_tasks_endpoint()
+    if endpoint is None:
+        message = "Aucun endpoint Nextcloud Tasks configuré" if not name else f"Endpoint Nextcloud Tasks introuvable: {name}"
+        if json_output:
+            console.print_json(data={"status": "missing", "message": message})
+        else:
+            console.print(message)
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(data=endpoint)
+        return
+    marker = " (défaut)" if endpoint.get("default") else ""
+    console.print(f"Nextcloud Tasks : {endpoint['name']}{marker}")
+    console.print(f"Calendrier : {endpoint['calendar']}")
+    console.print(f"CalDAV : {endpoint['calendar_home_url']}")
+    if endpoint.get("username_pass") or endpoint.get("password_pass"):
+        console.print("Auth pass : configurée")
+
+
+@nextcloud_tasks_app.command("list")
+def nextcloud_tasks_list(json_output: bool = typer.Option(False, "--json", help="Afficher en JSON")) -> None:
+    """Liste les endpoints Nextcloud Tasks/CalDAV enregistrés."""
+    endpoints = emploi_config.list_nextcloud_tasks_endpoints()
+    if json_output:
+        console.print_json(data={"endpoints": endpoints})
+        return
+    if not endpoints:
+        console.print("Aucun endpoint Nextcloud Tasks configuré")
+        return
+    table = Table("Nom", "Défaut", "Calendrier", "CalDAV")
+    for endpoint in endpoints:
+        table.add_row(endpoint["name"], endpoint.get("default", ""), endpoint["calendar"], endpoint["calendar_home_url"])
     console.print(table)
 
 
@@ -1347,6 +1424,9 @@ def application_pipeline(
     force_card: bool = typer.Option(False, "--force-card", help="Créer une nouvelle carte même si un événement existe déjà"),
     schedule_followup: bool | None = typer.Option(None, "--schedule-followup/--no-schedule-followup", help="Planifier une relance selon la config ou désactiver pour ce run"),
     followup_after: str = typer.Option("", "--followup-after", help="Délai de relance pour ce run, ex: 7d; vide = config"),
+    sync_followup_task: bool | None = typer.Option(None, "--sync-followup-task/--no-sync-followup-task", help="Créer la tâche Nextcloud de relance selon config ou choix du run"),
+    tasks_endpoint_name: str = typer.Option("", "--tasks-endpoint", help="Endpoint nextcloud-tasks; vide = défaut"),
+    force_followup_task: bool = typer.Option(False, "--force-followup-task", help="Recréer la tâche de relance même si un événement existe"),
     today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
 ) -> None:
     """Exporte le dossier candidature puis prépare/crée la carte Deck liée."""
@@ -1391,9 +1471,33 @@ def application_pipeline(
             auto_followup = get_auto_followup_config(conn)
             should_schedule_followup = bool(auto_followup["enabled"]) if schedule_followup is None else schedule_followup
             followup_date = ""
+            followup_task_result = None
             if should_schedule_followup:
                 delay_days = normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
                 followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
+                if not dry_run:
+                    application_id = add_application(conn, offer_id, status="sent")
+                    schedule_application_followup(conn, application_id, followup_date)
+                sync_config = get_followup_sync_config(conn)
+                should_sync_followup_task = bool(sync_config["enabled"]) if sync_followup_task is None else sync_followup_task
+                if should_sync_followup_task:
+                    tasks_endpoint = (
+                        emploi_config.get_nextcloud_tasks_endpoint(tasks_endpoint_name)
+                        if tasks_endpoint_name
+                        else emploi_config.get_default_nextcloud_tasks_endpoint()
+                    )
+                    if tasks_endpoint is None:
+                        raise ValueError("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
+                    if dry_run:
+                        followup_task_result = "dry-run"
+                    else:
+                        followup_task_result = create_followup_task(
+                            conn,
+                            application_id=application_id,
+                            endpoint=tasks_endpoint,
+                            dry_run=False,
+                            force=force_followup_task,
+                        )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     verb = "préparé" if dry_run else "effectué"
@@ -1411,6 +1515,14 @@ def application_pipeline(
         console.print("Carte déjà enregistrée : aucune nouvelle carte créée. Utilise --force-card pour recréer.")
     if followup_date:
         console.print(f"Relance : prévue le {followup_date}")
+        if followup_task_result == "dry-run":
+            console.print("Tâche Nextcloud : préparée (dry-run)")
+        elif followup_task_result is not None:
+            console.print(f"Tâche Nextcloud : {followup_task_result.summary}")
+            if followup_task_result.reused_existing:
+                console.print("Tâche déjà enregistrée : aucune nouvelle tâche créée.")
+            elif followup_task_result.href:
+                console.print(f"Tâche href : {followup_task_result.href}")
     elif schedule_followup is False:
         console.print("Relance : ignorée pour ce run")
     else:
@@ -1440,6 +1552,53 @@ def application_status(application_id: int, status: str) -> None:
 def application_update(application_id: int, status: str) -> None:
     """Alias sûr pour changer le statut d'une candidature."""
     _application_status_update(application_id, status)
+
+
+@application_app.command("followup-sync-config")
+def application_followup_sync_config(action: str = typer.Argument("show", help="show|enable|disable")) -> None:
+    """Configure la synchronisation des relances vers Nextcloud Tasks."""
+    normalized = action.strip().lower()
+    if normalized not in {"show", "enable", "disable"}:
+        raise typer.BadParameter("Action attendue: show, enable ou disable")
+    with connect() as conn:
+        init_db(conn)
+        if normalized == "show":
+            config = get_followup_sync_config(conn)
+        else:
+            config = set_followup_sync_config(conn, enabled=normalized == "enable")
+    state = "activée" if config["enabled"] else "désactivée"
+    console.print(f"Synchronisation relances Nextcloud Tasks {state}")
+
+
+@application_app.command("followup-sync")
+def application_followup_sync(
+    application_id: int = typer.Argument(0, help="ID candidature; 0 = relances dues"),
+    endpoint_name: str = typer.Option("", "--tasks-endpoint", help="Endpoint nextcloud-tasks; vide = défaut"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans créer de VTODO"),
+    force: bool = typer.Option(False, "--force", help="Recréer même si un événement existe"),
+    today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
+) -> None:
+    """Synchronise une relance ou les relances dues vers Nextcloud Tasks."""
+    endpoint = emploi_config.get_nextcloud_tasks_endpoint(endpoint_name) if endpoint_name else emploi_config.get_default_nextcloud_tasks_endpoint()
+    if endpoint is None:
+        raise typer.BadParameter("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
+    try:
+        with connect() as conn:
+            init_db(conn)
+            if application_id:
+                results = [create_followup_task(conn, application_id=application_id, endpoint=endpoint, dry_run=dry_run, force=force)]
+            else:
+                results = sync_due_followup_tasks(conn, endpoint=endpoint, today=_parse_today(today).isoformat(), dry_run=dry_run, force=force)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    if not results:
+        console.print("Aucune relance à synchroniser.")
+        return
+    for result in results:
+        verb = "préparée" if dry_run else ("déjà enregistrée" if result.reused_existing else "créée")
+        console.print(f"Tâche Nextcloud {verb} : candidature #{result.application_id} — {result.summary} — échéance {result.due_date}")
+        if result.href:
+            console.print(f"Href : {result.href}")
 
 
 @application_app.command("followup-config")

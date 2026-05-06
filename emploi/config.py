@@ -38,6 +38,10 @@ def _nextcloud_files_endpoints_file() -> Path:
     return _emploi_config_dir() / "nextcloud_files.json"
 
 
+def _nextcloud_tasks_endpoints_file() -> Path:
+    return _emploi_config_dir() / "nextcloud_tasks.json"
+
+
 def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         with open(path) as f:
@@ -462,3 +466,102 @@ def set_nextcloud_files_endpoint(
     default = normalized_name if make_default or not data.get("default") else str(data.get("default", "") or "")
     _write_json(_nextcloud_files_endpoints_file(), {"default": default, "endpoints": endpoints})
     return _normalize_nextcloud_files_endpoint(normalized_name, endpoint, default_name=default)
+
+
+# ── Nextcloud Tasks/CalDAV endpoints ─────────────────────────────────────
+
+def _empty_nextcloud_tasks_endpoints_payload() -> dict[str, Any]:
+    return {"default": "", "endpoints": {}}
+
+
+def _load_nextcloud_tasks_endpoints_payload() -> dict[str, Any]:
+    data = _load_json(_nextcloud_tasks_endpoints_file()) or _empty_nextcloud_tasks_endpoints_payload()
+    endpoints = data.get("endpoints", {})
+    if not isinstance(endpoints, dict):
+        endpoints = {}
+    default = str(data.get("default", "") or "")
+    return {"default": default, "endpoints": endpoints}
+
+
+def _normalize_calendar_name(calendar: str) -> str:
+    name = str(calendar or "").strip() or "tasks"
+    return name.strip("/") or "tasks"
+
+
+def _normalize_nextcloud_tasks_endpoint(name: str, raw: dict[str, Any], *, default_name: str = "") -> dict[str, Any]:
+    base_url = str(raw.get("base_url", "") or "").rstrip("/")
+    calendar = _normalize_calendar_name(str(raw.get("calendar", "") or "tasks"))
+    caldav_base_path = str(raw.get("caldav_base_path", "/remote.php/dav/calendars") or "/remote.php/dav/calendars")
+    if not caldav_base_path.startswith("/"):
+        caldav_base_path = "/" + caldav_base_path
+    calendar_home_url = f"{base_url}{caldav_base_path}/{{username}}/{calendar}" if base_url else ""
+    return {
+        "name": name,
+        "base_url": base_url,
+        "calendar": calendar,
+        "caldav_base_path": caldav_base_path,
+        "calendar_home_url": calendar_home_url,
+        "username_pass": str(raw.get("username_pass", "") or ""),
+        "password_pass": str(raw.get("password_pass", "") or ""),
+        "default": "✓" if name == default_name else "",
+    }
+
+
+def list_nextcloud_tasks_endpoints() -> list[dict[str, Any]]:
+    data = _load_nextcloud_tasks_endpoints_payload()
+    default_name = str(data.get("default", "") or "")
+    endpoints = data.get("endpoints", {})
+    return [
+        _normalize_nextcloud_tasks_endpoint(name, raw, default_name=default_name)
+        for name, raw in sorted(endpoints.items())
+        if isinstance(raw, dict)
+    ]
+
+
+def get_nextcloud_tasks_endpoint(name: str) -> dict[str, Any] | None:
+    data = _load_nextcloud_tasks_endpoints_payload()
+    raw = data.get("endpoints", {}).get(name)
+    if not isinstance(raw, dict):
+        return None
+    return _normalize_nextcloud_tasks_endpoint(name, raw, default_name=str(data.get("default", "") or ""))
+
+
+def get_default_nextcloud_tasks_endpoint() -> dict[str, Any] | None:
+    data = _load_nextcloud_tasks_endpoints_payload()
+    default_name = str(data.get("default", "") or "")
+    if default_name:
+        found = get_nextcloud_tasks_endpoint(default_name)
+        if found is not None:
+            return found
+    endpoints = list_nextcloud_tasks_endpoints()
+    return endpoints[0] if endpoints else None
+
+
+def set_nextcloud_tasks_endpoint(
+    name: str,
+    *,
+    base_url: str,
+    calendar: str = "tasks",
+    username_pass: str = "",
+    password_pass: str = "",
+    caldav_base_path: str = "/remote.php/dav/calendars",
+    make_default: bool = False,
+) -> dict[str, Any]:
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Nom d'endpoint Nextcloud Tasks obligatoire")
+    if not base_url.strip():
+        raise ValueError("URL Nextcloud obligatoire")
+    endpoint = {
+        "base_url": base_url.rstrip("/"),
+        "calendar": _normalize_calendar_name(calendar),
+        "caldav_base_path": caldav_base_path,
+        "username_pass": username_pass,
+        "password_pass": password_pass,
+    }
+    data = _load_nextcloud_tasks_endpoints_payload()
+    endpoints = dict(data.get("endpoints", {}))
+    endpoints[normalized_name] = endpoint
+    default = normalized_name if make_default or not data.get("default") else str(data.get("default", "") or "")
+    _write_json(_nextcloud_tasks_endpoints_file(), {"default": default, "endpoints": endpoints})
+    return _normalize_nextcloud_tasks_endpoint(normalized_name, endpoint, default_name=default)

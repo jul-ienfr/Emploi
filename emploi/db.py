@@ -24,6 +24,7 @@ FEATURE_OPTIONS: dict[str, bool] = {
 }
 AUTO_FOLLOWUP_ENABLED_KEY = "application.followup.auto.enabled"
 AUTO_FOLLOWUP_DELAY_KEY = "application.followup.auto.delay_days"
+FOLLOWUP_SYNC_ENABLED_KEY = "application.followup.sync.enabled"
 DEFAULT_AUTO_FOLLOWUP_DELAY_DAYS = 10
 FRANCE_TRAVAIL_RADIUS_OPTIONS = (0, 5, 10, 20, 30, 50, 100)
 AUTO_APPLY_MODES = frozenset({"off", "draft", "open", "submit"})
@@ -205,6 +206,17 @@ def set_auto_followup_config(
     if delay_days is not None:
         _set_setting_value(conn, AUTO_FOLLOWUP_DELAY_KEY, str(normalize_followup_delay(delay_days)))
     return get_auto_followup_config(conn)
+
+
+def get_followup_sync_config(conn: sqlite3.Connection) -> dict[str, object]:
+    enabled_raw = _get_setting_value(conn, FOLLOWUP_SYNC_ENABLED_KEY)
+    enabled = False if enabled_raw is None else _parse_boolean_option(FOLLOWUP_SYNC_ENABLED_KEY, enabled_raw)
+    return {"enabled": enabled}
+
+
+def set_followup_sync_config(conn: sqlite3.Connection, *, enabled: bool) -> dict[str, object]:
+    _set_setting_value(conn, FOLLOWUP_SYNC_ENABLED_KEY, "true" if enabled else "false")
+    return get_followup_sync_config(conn)
 
 
 def add_offer(
@@ -747,6 +759,7 @@ def list_next_actions(
             actions.append(
                 {
                     "action": "Relancer candidature",
+                    "application_id": row["application_id"],
                     "offer_id": row["offer_id"],
                     "title": row["title"],
                     "company": row["company"],
