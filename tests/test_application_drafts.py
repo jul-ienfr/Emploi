@@ -114,9 +114,13 @@ def test_application_draft_uses_driver_profile_message_for_pl_offer(tmp_path, mo
     content = next(drafts_dir.glob("*.md")).read_text(encoding="utf-8")
     assert "## Message proposé" in content
     assert "Je souhaite candidater au poste de Chauffeur Poids Lourd H/F à Bons-en-Chablais." in content
-    assert "Je dispose du permis C" in content
+    assert "Je dispose du permis C et de la FIMO" in content
     assert "je n’ai pas encore de carte conducteur en cours de validité" in content
-    assert "accompagner ou prendre en charge cette demande" in content
+    assert "je voulais savoir si l’entreprise peut prendre en charge cette demande" in content
     assert "motivé, sérieux, ponctuel" not in content
+    assert "missions de conduite" not in content
+    assert "livraison/enlèvement" not in content
+    assert "si mon profil vous intéresse" not in content
+    assert "je peux engager la démarche rapidement" not in content
     assert "support informatique" not in content
     assert "Ne pas masquer l’absence actuelle de carte conducteur" in content
