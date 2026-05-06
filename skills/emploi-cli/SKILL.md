@@ -98,7 +98,7 @@ emploi hellowork apply 1 --submit --kanban-stack candidature-envoyee
 emploi hellowork apply 1 --submit --no-kanban
 ```
 
-Règle : `emploi hellowork apply` lance un dry-run par défaut. Il ouvre l'offre HelloWork, extrait le formulaire, vérifie prénom/nom/email/CV/bouton submit et enregistre seulement `hellowork_apply_dry_run`. `--submit` est requis pour envoyer réellement; après confirmation HelloWork, le CLI crée une application locale `sent`, ajoute l'événement `application_submitted`, passe l'offre en `sent`, puis crée/réutilise une carte Deck dans la stack `candidature-envoyee` via l'endpoint Kanban par défaut. Utiliser `--no-kanban` uniquement si Julien demande de ne pas toucher au board. Ne jamais logger `FunnelId`, cookies, credentials ou payloads complets.
+Règle : `emploi hellowork apply` lance un dry-run par défaut. Il ouvre l'offre HelloWork, extrait le formulaire, vérifie prénom/nom/email/CV/bouton submit et enregistre seulement `hellowork_apply_dry_run`. `--submit` est requis pour envoyer réellement; après confirmation HelloWork, le CLI crée une application locale `sent`, ajoute l'événement `application_submitted`, passe l'offre en `sent`, puis crée/réutilise une carte Deck dans la stack `candidature-envoyee` via l'endpoint Kanban par défaut. Utiliser `--no-kanban` uniquement si Julien demande de ne pas toucher au board. Ne jamais logger `FunnelId`, cookies, credentials ou payloads complets. Voir `references/hellowork-application-flow.md`.
 
 ### Options opérateur globales
 

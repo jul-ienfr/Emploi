@@ -20,6 +20,7 @@ def test_repo_contains_hermes_skill_for_emploi_cli():
     assert "sans `Invalid value`, sans traceback" in content
     assert "sans événement `partner_opened`" in content
     assert "references/france-travail-partner-handoff-hardening.md" in content
+    assert "references/hellowork-application-flow.md" in content
 
 
 def test_repo_skill_includes_ft_partner_handoff_hardening_reference():
@@ -30,6 +31,17 @@ def test_repo_skill_includes_ft_partner_handoff_hardening_reference():
     assert "lifecycle_open" in content
     assert "no `partner_opened` event recorded" in content
     assert "typer.Exit(1)" in content
+
+
+def test_repo_skill_includes_hellowork_application_flow_reference():
+    reference = PROJECT_ROOT / "skills" / "emploi-cli" / "references" / "hellowork-application-flow.md"
+    assert reference.exists()
+    content = reference.read_text()
+    assert "emploi hellowork apply OFFER_ID --submit" in content
+    assert "candidature-envoyee" in content
+    assert "application_submitted" in content
+    assert "FunnelId" in content
+    assert "LastName" in content
 
 
 def test_readme_points_hermes_to_repo_skill():
