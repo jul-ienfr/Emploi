@@ -78,6 +78,17 @@ emploi ft apply 1 --partner hellowork
 
 `emploi ft apply` reste assisté : `--check` vérifie sans soumettre, `--open` ouvre l'offre France Travail, et `--partner NOM` ouvre explicitement un handoff externe détecté après choix opérateur. Même avec `--partner`, le CLI n'effectue aucun clic final ni soumission de candidature.
 
+HelloWork via Managed Browser :
+
+```bash
+emploi hellowork apply 1
+emploi hellowork apply 1 --submit
+emploi hellowork apply 1 --submit --kanban-stack candidature-envoyee
+emploi hellowork apply 1 --submit --no-kanban
+```
+
+`emploi hellowork apply` est en dry-run par défaut : il ouvre l'offre HelloWork, charge le formulaire, vérifie les champs requis et le CV, puis s'arrête sans POST final. Le POST réel n'est exécuté qu'avec `--submit`; après confirmation HelloWork, le CLI enregistre `application_submitted`, passe la candidature locale en `sent`, et crée/réutilise une carte Deck dans la stack Kanban `candidature-envoyee` quand l'endpoint kanban est configuré. Les secrets et champs dynamiques sensibles comme `FunnelId` ne sont pas loggés.
+
 Imports multi-sources sans scraping direct :
 
 ```bash

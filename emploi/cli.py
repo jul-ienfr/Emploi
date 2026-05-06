@@ -62,6 +62,7 @@ from emploi.france_travail.flows import (
     run_saved_search,
     search_offers,
 )
+from emploi.hellowork import apply_hellowork
 from emploi.importers import import_offers_file
 from emploi.nextcloud_deck import create_offer_card
 from emploi.nextcloud_files import export_application_to_nextcloud
@@ -72,6 +73,7 @@ offer_app = typer.Typer(help="Gestion des offres")
 application_app = typer.Typer(help="Gestion des candidatures")
 browser_app = typer.Typer(help="Commandes Managed Browser")
 ft_app = typer.Typer(help="Flux France Travail via Managed Browser")
+hellowork_app = typer.Typer(help="Flux HelloWork via Managed Browser")
 search_profile_app = typer.Typer(help="Profils de recherche sauvegardés")
 auto_apply_app = typer.Typer(help="Sélection/candidature automatique bornée par profil")
 import_app = typer.Typer(help="Imports génériques sans scraping")
@@ -85,6 +87,7 @@ app.add_typer(offer_app, name="offer")
 app.add_typer(application_app, name="application")
 app.add_typer(browser_app, name="browser")
 app.add_typer(ft_app, name="ft")
+app.add_typer(hellowork_app, name="hellowork")
 app.add_typer(search_profile_app, name="search-profile")
 app.add_typer(auto_apply_app, name="auto-apply")
 app.add_typer(import_app, name="import")
@@ -1065,6 +1068,67 @@ def ft_apply(
     except ValueError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
+
+
+@hellowork_app.command("apply")
+def hellowork_apply(
+    offer_id: int,
+    submit: bool = typer.Option(False, "--submit", help="Envoyer réellement la candidature HelloWork"),
+    url: str = typer.Option("", "--url", help="URL HelloWork explicite si elle n'est pas en base"),
+    motivation: str = typer.Option("", "--motivation", help="Message de motivation explicite; vide = brouillon local"),
+    drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
+    no_kanban: bool = typer.Option(False, "--no-kanban", help="Ne pas créer/mettre à jour la carte Deck après envoi"),
+    kanban_stack: str = typer.Option("", "--kanban-stack", help="Alias/ID stack Deck candidature envoyée"),
+    kanban_endpoint: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Prévisualise ou envoie une candidature HelloWork via Managed Browser."""
+    _ensure_option_enabled("managed_browser.enabled")
+    try:
+        browser = ManagedBrowserClient()
+        with connect() as conn:
+            init_db(conn)
+            result = apply_hellowork(
+                conn,
+                offer_id,
+                browser=browser,
+                submit=submit,
+                url=url,
+                motivation=motivation,
+                drafts_dir=drafts_dir,
+                site=site,
+                profile=profile,
+                kanban=not no_kanban,
+                kanban_stack=kanban_stack,
+                kanban_endpoint=kanban_endpoint,
+            )
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+    except ValueError as error:
+        console.print(f"[red]Error:[/red] {error}")
+        raise typer.Exit(1) from error
+
+    console.print(f"HelloWork offre #{result.offer_id} : {result.status}")
+    console.print(result.message)
+    console.print(f"URL : {result.url}")
+    console.print("CV : détecté" if result.form.cv_present else "CV : manquant")
+    if result.form.dissuasion_required:
+        skills = ", ".join(result.form.dissuasion_skills) or "non précisées"
+        console.print(f"Avertissement compétences HelloWork : {skills}")
+    if result.application_id is not None:
+        console.print(f"Candidature locale : #{result.application_id}")
+    if result.deck_card is not None:
+        verb = "préparée" if result.deck_card.dry_run else "créée/enregistrée"
+        console.print(f"Carte Deck {verb} : stack {result.deck_card.stack_id}")
+        if result.deck_card.card_id is not None:
+            console.print(f"Carte ID : {result.deck_card.card_id}")
+        if result.deck_card.reused_existing:
+            console.print("Carte Deck déjà existante : réutilisée.")
+    elif not no_kanban:
+        console.print("Kanban : non configuré ou non applicable en dry-run.")
+    if not submit:
+        console.print("Dry-run : aucune candidature envoyée. Ajoute --submit pour envoyer.")
 
 
 @search_profile_app.command("add")

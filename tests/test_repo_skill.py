@@ -13,6 +13,9 @@ def test_repo_contains_hermes_skill_for_emploi_cli():
     assert "emploi search-profile run --all" in content
     assert "emploi ft apply" in content
     assert "emploi ft apply 1 --partner hellowork" in content
+    assert "emploi hellowork apply 1 --submit" in content
+    assert "application_submitted" in content
+    assert "candidature-envoyee" in content
     assert "ne soumet jamais automatiquement" in content
     assert "sans `Invalid value`, sans traceback" in content
     assert "sans événement `partner_opened`" in content
@@ -41,3 +44,12 @@ def test_readme_documents_current_france_travail_managed_browser_contract():
     assert "`lifecycle open` pour les flux France Travail" in readme
     assert "emploi ft apply 1 --partner hellowork" in readme
     assert "aucun clic final ni soumission" in readme
+
+
+def test_readme_documents_hellowork_submit_and_kanban_contract():
+    readme = (PROJECT_ROOT / "README.md").read_text()
+    assert "emploi hellowork apply 1" in readme
+    assert "emploi hellowork apply 1 --submit" in readme
+    assert "application_submitted" in readme
+    assert "candidature-envoyee" in readme
+    assert "FunnelId" in readme

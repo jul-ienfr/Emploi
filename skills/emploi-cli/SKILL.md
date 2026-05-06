@@ -21,6 +21,7 @@ Utilise cette skill quand Julien demande de travailler sur sa recherche d'emploi
 - La variable `EMPLOI_DB` permet de viser une autre base.
 - France Travail passe par Managed Browser, pas par scraping direct côté agent.
 - `emploi ft apply` ne soumet jamais automatiquement une candidature : il vérifie, prépare un brouillon local ou ouvre l'offre. Toute soumission réelle doit rester validée humainement par Julien.
+- `emploi hellowork apply` est le flow réutilisable pour HelloWork : dry-run par défaut, soumission réelle uniquement avec `--submit`, puis trace locale `application_submitted` et carte Deck `candidature-envoyee` si Kanban configuré.
 
 ## Préflight recommandé
 
@@ -87,6 +88,17 @@ emploi ft apply 1 --partner hellowork
 ```
 
 Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` pour vérifier, `--draft` pour préparer, `--open` pour ouvrir l'offre France Travail dans le navigateur managé, ou `--partner NOM` pour ouvrir explicitement un partenaire externe détecté (ex. Meteojob/HelloWork) après handoff structuré. `--partner` ouvre seulement l'URL partenaire choisie via Managed Browser; il ne clique pas les liens de candidature finale et ne soumet rien. Si le partenaire demandé est absent ou sans URL exploitable, le CLI doit afficher une erreur propre `Error: ...`, sans `Invalid value`, sans traceback, sans ouverture externe et sans événement `partner_opened`. Voir `references/france-travail-partner-handoff-hardening.md`.
+
+### HelloWork
+
+```bash
+emploi hellowork apply 1
+emploi hellowork apply 1 --submit
+emploi hellowork apply 1 --submit --kanban-stack candidature-envoyee
+emploi hellowork apply 1 --submit --no-kanban
+```
+
+Règle : `emploi hellowork apply` lance un dry-run par défaut. Il ouvre l'offre HelloWork, extrait le formulaire, vérifie prénom/nom/email/CV/bouton submit et enregistre seulement `hellowork_apply_dry_run`. `--submit` est requis pour envoyer réellement; après confirmation HelloWork, le CLI crée une application locale `sent`, ajoute l'événement `application_submitted`, passe l'offre en `sent`, puis crée/réutilise une carte Deck dans la stack `candidature-envoyee` via l'endpoint Kanban par défaut. Utiliser `--no-kanban` uniquement si Julien demande de ne pas toucher au board. Ne jamais logger `FunnelId`, cookies, credentials ou payloads complets.
 
 ### Options opérateur globales
 
@@ -180,6 +192,8 @@ Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, 
    - puis éventuellement `emploi application draft <id>` ou `emploi ft apply <id> --draft` ;
    - ouvrir manuellement avec `emploi ft apply <id> --open` si Julien veut finaliser côté France Travail ;
    - si le check expose un handoff partenaire, utiliser seulement sur demande explicite `emploi ft apply <id> --partner hellowork|meteojob` pour ouvrir ce partenaire choisi ;
+   - pour HelloWork, utiliser `emploi hellowork apply <id>` en dry-run puis `emploi hellowork apply <id> --submit` seulement si Julien demande explicitement de postuler ;
+   - après `--submit`, vérifier la confirmation, la trace `application_submitted`, le statut `sent` et la carte Deck `candidature-envoyee` ;
    - ne jamais cliquer/soumettre automatiquement une candidature réelle sans validation explicite.
 5. Pour modifier le CLI : suivre TDD strict, puis :
    ```bash
