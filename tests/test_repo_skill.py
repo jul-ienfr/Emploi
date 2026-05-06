@@ -14,6 +14,8 @@ def test_repo_contains_hermes_skill_for_emploi_cli():
     assert "emploi ft apply" in content
     assert "emploi ft apply 1 --partner hellowork" in content
     assert "ne soumet jamais automatiquement" in content
+    assert "sans `Invalid value`, sans traceback" in content
+    assert "sans événement `partner_opened`" in content
 
 
 def test_readme_points_hermes_to_repo_skill():

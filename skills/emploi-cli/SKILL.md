@@ -86,7 +86,7 @@ emploi ft apply 1 --open
 emploi ft apply 1 --partner hellowork
 ```
 
-Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` pour vérifier, `--draft` pour préparer, `--open` pour ouvrir l'offre France Travail dans le navigateur managé, ou `--partner NOM` pour ouvrir explicitement un partenaire externe détecté (ex. Meteojob/HelloWork) après handoff structuré. `--partner` ouvre seulement l'URL partenaire choisie via Managed Browser; il ne clique pas les liens de candidature finale et ne soumet rien.
+Règle : `emploi ft apply` ne soumet jamais automatiquement. Utiliser `--check` pour vérifier, `--draft` pour préparer, `--open` pour ouvrir l'offre France Travail dans le navigateur managé, ou `--partner NOM` pour ouvrir explicitement un partenaire externe détecté (ex. Meteojob/HelloWork) après handoff structuré. `--partner` ouvre seulement l'URL partenaire choisie via Managed Browser; il ne clique pas les liens de candidature finale et ne soumet rien. Si le partenaire demandé est absent ou sans URL exploitable, le CLI doit afficher une erreur propre `Error: ...`, sans `Invalid value`, sans traceback, sans ouverture externe et sans événement `partner_opened`.
 
 ### Options opérateur globales
 
