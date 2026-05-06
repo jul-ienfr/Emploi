@@ -611,6 +611,6 @@ def open_offer(conn, offer_id: int, *, browser: BrowserLike | None = None, site:
     url = _offer_url(offer)
     if not url:
         raise ValueError(f"Offre #{offer_id} sans URL navigateur")
-    _browser(browser).open(url, site=site, profile=profile)
+    _browser(browser).lifecycle_open(url, site=site, profile=profile)
     add_offer_event(conn, offer_id, event_type="opened", message=url)
     return url

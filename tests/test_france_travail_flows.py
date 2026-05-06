@@ -1,6 +1,6 @@
 from emploi.browser.models import BrowserCommandResult
 from emploi.db import add_application, add_offer, connect, get_offer, init_db, list_offer_events
-from emploi.france_travail.flows import apply_check_offer, build_search_url, draft_application, refresh_offer, search_offers
+from emploi.france_travail.flows import apply_check_offer, build_search_url, draft_application, open_offer, refresh_offer, search_offers
 
 
 class FakeBrowser:
@@ -327,6 +327,11 @@ def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(
     assert draft_browser.commands[0][0] == "lifecycle_open"
     assert already_browser.commands[0][0] == "lifecycle_open"
     assert not any(command[0] == "open" for command in browser.commands + draft_browser.commands + already_browser.commands)
+    open_browser = FakeBrowser([])
+    opened_url = open_offer(conn, active_id, browser=open_browser)
+    assert opened_url.endswith("ABC123")
+    assert open_browser.commands[0][0] == "lifecycle_open"
+    assert not any(command[0] == "open" for command in open_browser.commands)
     assert any("signal" in reason.lower() for reason in ok.reasons)
     assert draft.can_apply is True
     assert not any("déjà" in reason.lower() for reason in draft.reasons)
