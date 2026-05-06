@@ -4,7 +4,7 @@ import subprocess
 from typer.testing import CliRunner
 
 from emploi.cli import app
-from emploi.db import add_offer, connect, init_db
+from emploi.db import add_offer, connect, init_db, list_offer_events
 
 
 runner = CliRunner()
@@ -165,6 +165,52 @@ def test_ft_apply_partner_opens_selected_external_partner(tmp_path, monkeypatch)
     opened_urls = [call[call.index("--url") + 1] for call in calls if call[1:3] == ["lifecycle", "open"]]
     assert opened_urls[-1] == "https://www.hellowork.com/fr-fr/emplois/123.html"
     assert not any(call[1] == "navigate" for call in calls)
+
+
+def test_ft_apply_partner_missing_partner_returns_clean_cli_error_without_external_open(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    conn = connect(db_path)
+    init_db(conn)
+    add_offer(
+        conn,
+        title="Support",
+        external_source="france-travail",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+    )
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1:3] == ["lifecycle", "open"]:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
+        if args[1] == "snapshot":
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"text": "Postuler à l'offre"}), stderr="")
+        if args[1:3] == ["console", "eval"]:
+            expression = args[args.index("--expression") + 1]
+            if "target.click" in expression:
+                return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"value": {"clicked": True}}), stderr="")
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps({"value": [{"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"}]}),
+                stderr="",
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(app, ["ft", "apply", "1", "--partner", "hellowork"])
+
+    assert result.exit_code != 0
+    assert "Error: Partenaire introuvable" in result.output
+    assert "Invalid value" not in result.output
+    assert "Traceback" not in result.output
+    opened_urls = [call[call.index("--url") + 1] for call in calls if call[1:3] == ["lifecycle", "open"]]
+    assert opened_urls == ["https://candidat.francetravail.fr/offres/recherche/detail/ABC123"]
+    with connect(db_path) as verify_conn:
+        assert all(event["event_type"] != "partner_opened" for event in list_offer_events(verify_conn, 1))
 
 
 def test_ft_smoke_dry_run_json_does_not_touch_database_or_submit(tmp_path, monkeypatch):

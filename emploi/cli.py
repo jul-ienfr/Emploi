@@ -1063,7 +1063,8 @@ def ft_apply(
     except ManagedBrowserError as error:
         _handle_browser_error(error)
     except ValueError as error:
-        raise typer.BadParameter(str(error)) from error
+        console.print(f"[red]Error:[/red] {error}")
+        raise typer.Exit(1) from error
 
 
 @search_profile_app.command("add")
