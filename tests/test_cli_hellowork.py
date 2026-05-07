@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 import emploi.config as emploi_config
 from emploi.cli import app
-from emploi.db import add_offer, connect, init_db, list_offer_events
+from emploi.db import add_application, add_offer, connect, init_db, list_offer_events
 
 
 def reload_config(monkeypatch, tmp_path):
@@ -205,6 +205,50 @@ def test_hellowork_apply_unconfirmed_submit_does_not_create_deck_card(monkeypatc
     assert result.exit_code == 1
     assert "Confirmation HelloWork non détectée" in result.stdout
     assert deck_requests == []
+    with connect(db_path) as conn:
+        assert list_offer_events(conn, offer_id) == []
+
+
+def test_hellowork_apply_submit_cli_refuses_already_sent_without_second_post(monkeypatch, tmp_path):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    calls: list[list[str]] = []
+
+    with connect(db_path) as conn:
+        init_db(conn)
+        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        add_application(conn, offer_id, status="sent", notes="Déjà envoyée")
+
+    def fake_run(args, capture_output=True, text=True, check=False):
+        calls.append(args)
+        if args[1:3] == ["lifecycle", "open"]:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"success": True}), stderr="")
+        expression = args[args.index("--expression") + 1]
+        assert "postcandidateinformationfromstepframeview" not in expression
+        return _fake_completed(
+            {
+                "initialStatus": 200,
+                "funnelIdPresent": True,
+                "firstnamePresent": True,
+                "lastnamePresent": True,
+                "emailPresent": True,
+                "motivationPresent": True,
+                "submitButtonPresent": True,
+                "cvPresent": True,
+                "dissuasionRequired": False,
+                "dissuasionSkills": [],
+            }
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = CliRunner().invoke(app, ["hellowork", "apply", str(offer_id), "--submit", "--no-kanban"])
+
+    assert result.exit_code == 1
+    assert "déjà envoyée" in result.stdout
+    assert "Traceback" not in result.output
+    assert "Invalid value" not in result.output
+    assert not any("postcandidateinformationfromstepframeview" in " ".join(call) for call in calls)
     with connect(db_path) as conn:
         assert list_offer_events(conn, offer_id) == []
 

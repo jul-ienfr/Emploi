@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from emploi.db import add_offer, connect, get_offer, init_db, list_applications, list_offer_events, upsert_draft_application
+from emploi.db import add_application, add_offer, connect, get_offer, init_db, list_applications, list_offer_events, upsert_draft_application
 from emploi.hellowork import apply_hellowork, inspect_hellowork_form
 
 
@@ -130,6 +130,33 @@ def test_apply_hellowork_submit_does_not_duplicate_existing_draft_application(tm
     assert applications[0]["status"] == "sent"
     assert applications[0]["draft_path"] == "/tmp/draft.md"
     assert get_offer(conn, offer_id)["status"] == "sent"
+
+
+def test_apply_hellowork_submit_refuses_when_already_sent(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    add_application(conn, offer_id, status="sent", notes="Déjà envoyée")
+    browser = FakeBrowser()
+
+    try:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+    except ValueError as error:
+        assert "déjà envoyée" in str(error)
+    else:
+        raise AssertionError("Expected duplicate HelloWork submit to be refused")
+
+    assert len(list_applications(conn)) == 1
+    assert not any("postcandidateinformationfromstepframeview" in expr for expr in browser.expressions)
+    assert get_offer(conn, offer_id)["status"] == "applied"
 
 
 def test_apply_hellowork_submit_records_application_and_deck_card(tmp_path):

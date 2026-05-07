@@ -414,6 +414,12 @@ def apply_hellowork(
             form=form,
             deck_card=deck,
         )
+    already_sent = conn.execute(
+        "SELECT id FROM applications WHERE offer_id = ? AND status = 'sent' ORDER BY id DESC LIMIT 1",
+        (offer_id,),
+    ).fetchone()
+    if already_sent is not None:
+        raise ValueError(f"Candidature HelloWork déjà envoyée pour l'offre #{offer_id}")
     final_motivation = motivation if motivation else _read_draft_message(offer_id, drafts_dir=drafts_dir)
     data = _json_from_browser_result(
         browser.console_eval(_submit_expression(form.offer_external_id, final_motivation), site=site, profile=profile)
