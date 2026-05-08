@@ -46,6 +46,7 @@ Initialisation, diagnostic et offres locales :
 emploi init
 emploi doctor
 emploi doctor --json
+emploi doctor --no-browser-probe  # sans probe Managed Browser
 emploi offer add --title "Technicien support" --company "Entreprise X" --location "Bonneville"
 emploi offer list
 emploi offer show 1
@@ -82,12 +83,12 @@ HelloWork via Managed Browser :
 
 ```bash
 emploi hellowork apply 1
-emploi hellowork apply 1 --submit
-emploi hellowork apply 1 --submit --kanban-stack candidature-envoyee
-emploi hellowork apply 1 --submit --no-kanban
+emploi hellowork apply 1 --submit --yes
+emploi hellowork apply 1 --submit --yes --kanban-stack candidature-envoyee
+emploi hellowork apply 1 --submit --yes --no-kanban
 ```
 
-`emploi hellowork apply` est en dry-run par défaut : il ouvre l'offre HelloWork, charge le formulaire, vérifie les champs requis et le CV, puis s'arrête sans POST final. Le POST réel n'est exécuté qu'avec `--submit`; après confirmation HelloWork, le CLI enregistre `application_submitted`, passe la candidature locale en `sent`, et crée/réutilise une carte Deck dans la stack Kanban `candidature-envoyee` quand l'endpoint kanban est configuré. Les secrets et champs dynamiques sensibles comme `FunnelId` ne sont pas loggés.
+`emploi hellowork apply` est en dry-run par défaut : il ouvre l'offre HelloWork, charge le formulaire, vérifie les champs requis et le CV, puis s'arrête sans POST final. Le POST réel n'est exécuté qu'avec `--submit --yes`; après confirmation HelloWork, le CLI enregistre `application_submitted`, passe la candidature locale en `sent`, et crée/réutilise une carte Deck dans la stack Kanban `candidature-envoyee` quand l'endpoint kanban est configuré. Les secrets et champs dynamiques sensibles comme `FunnelId` ne sont pas loggés. `--ack-dissuasion` permet de confirmer l'envoi malgré un avertissement compétences HelloWork.
 
 Imports multi-sources sans scraping direct :
 

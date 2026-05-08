@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from emploi import config as emploi_config
 from emploi.applications import DEFAULT_DRAFTS_DIR
-from emploi.db import add_application, add_offer_event, get_offer, init_db, list_offer_events, update_offer_status
+from emploi.db import add_application, add_offer_event, get_offer, list_offer_events, update_offer_status
 from emploi.nextcloud_deck import DeckCardResult, create_offer_card
 
 
@@ -82,22 +82,25 @@ def _first_hellowork_url_from_events(conn, offer_id: int) -> str:
             data = json.loads(payload)
         except json.JSONDecodeError:
             data = {}
-        candidates: list[str] = []
         if isinstance(data, dict):
             for key in ("url", "partner_url", "external_url"):
                 value = data.get(key)
                 if isinstance(value, str):
-                    candidates.append(value)
+                    match = re.search(r"https://www\.hellowork\.com/[^\"'\s<>]+", value)
+                    if match:
+                        return match.group(0).replace("\\/", "/")
             partners = data.get("partner_handoff") or data.get("partners")
             if isinstance(partners, list):
                 for partner in partners:
-                    if isinstance(partner, dict) and isinstance(partner.get("url"), str):
-                        candidates.append(partner["url"])
-        candidates.append(payload)
-        for candidate in candidates:
-            match = re.search(r"https://www\.hellowork\.com/[^\"'\s<>]+", candidate)
-            if match:
-                return match.group(0).replace("\\/", "/")
+                    if isinstance(partner, dict):
+                        p_url = partner.get("url")
+                        if isinstance(p_url, str):
+                            match = re.search(r"https://www\.hellowork\.com/[^\"'\s<>]+", p_url)
+                            if match:
+                                return match.group(0).replace("\\/", "/")
+        match = re.search(r"https://www\.hellowork\.com/[^\"'\s<>]+", payload)
+        if match:
+            return match.group(0).replace("\\/", "/")
     return ""
 
 
@@ -123,7 +126,7 @@ def _read_draft_message(offer_id: int, *, drafts_dir: str | None = None) -> str:
     if not candidates:
         return ""
     text = candidates[0].read_text(encoding="utf-8")
-    match = re.search(r"## Message proposé\n(.+?)(?:\n## |\Z)", text, re.S)
+    match = re.search(r"## (?:Message proposé|Message court à adapter)\n(.+?)(?:\n(?=## )|\Z)", text, re.S)
     return match.group(1).strip() if match else ""
 
 
@@ -137,10 +140,15 @@ def _browser_result_payload(result: Any) -> dict[str, Any]:
 def _browser_result_value(result: Any) -> Any:
     payload = _browser_result_payload(result)
     raw = payload.get("raw")
-    if isinstance(raw, dict) and "result" in raw:
-        return raw["result"]
+    if isinstance(raw, dict):
+        if "result" in raw:
+            return raw["result"]
+        if "value" in raw:
+            return raw["value"]
     if "result" in payload:
         return payload["result"]
+    if "value" in payload:
+        return payload["value"]
     return payload
 
 
@@ -197,10 +205,22 @@ def _inspect_expression(offer_external_id: str, motivation: str) -> str:
   out.cvStatus = cvResponse.status;
   const cvHtml = await cvResponse.text();
   out.cvLength = cvHtml.length;
-  const cvText = cvHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  out.cvPresent = /CV FRENDO-ROSSI\.pdf|\.pdf/i.test(cvText + ' ' + cvHtml);
+  const cvDoc = parser.parseFromString(cvHtml, 'text/html');
+  const cvText = cvHtml.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();
+  const uploadedCvSelector = [
+    '[data-cy*="uploaded" i]',
+    '[data-testid*="uploaded" i]',
+    '[class*="uploaded" i]',
+    '[class*="selected" i]',
+    '[href*="cv" i]',
+    '[value*=".pdf" i]'
+  ].join(',');
+  const uploadedCvElements = Array.from(cvDoc.querySelectorAll(uploadedCvSelector));
+  out.cvPresent = uploadedCvElements.some((element) => /\\.pdf|cv|curriculum/i.test(
+    element.textContent + ' ' + element.getAttribute('href') + ' ' + element.getAttribute('value')
+  ));
   out.cvTextPreview = cvText.slice(0, 240);
-  out.dissuasionRequired = /postcertificationdissuasionformstepframeview|compétences? absentes?|skills?/i.test(initialHtml + ' ' + document.body.innerText);
+  out.dissuasionRequired = /postcertificationdissuasionformstepframeview|compétences? (?:absentes?|manquantes?)/i.test(initialHtml + ' ' + document.body.innerText);
   const skills = Array.from((initialHtml + ' ' + document.body.innerText).matchAll(/(?:FIMO|FCO|Carte de conducteur)/gi)).map(m => m[0]);
   out.dissuasionSkills = Array.from(new Set(skills.map(s => s.toUpperCase())));
   return JSON.stringify(out);
@@ -226,15 +246,6 @@ def _submit_expression(offer_external_id: str, motivation: str) -> str:
   const field = form.querySelector('[name="MotivationLetter"]');
   if (field && motivation) field.value = motivation;
   let responseText = '';
-  const dissuasion = document.querySelector('form[action*="postcertificationdissuasionformstepframeview"]');
-  if (dissuasion) {{
-    const dissuasionResponse = await fetch(dissuasion.action || '/fr-fr/offres/postcertificationdissuasionformstepframeview', {{
-      method: 'POST', credentials: 'include', body: new FormData(dissuasion),
-      headers: {{'Turbo-Frame': 'funnel-frame'}}
-    }});
-    out.dissuasionStatus = dissuasionResponse.status;
-    responseText = await dissuasionResponse.text();
-  }}
   const submitResponse = await fetch(form.action || '/fr-fr/offres/postcandidateinformationfromstepframeview', {{
     method: 'POST', credentials: 'include', body: new FormData(form),
     headers: {{'Turbo-Frame': 'funnel-frame'}}
@@ -246,8 +257,8 @@ def _submit_expression(offer_external_id: str, motivation: str) -> str:
   await new Promise(r => setTimeout(r, 800));
   const text = document.body.innerText || '';
   out.urlAfter = location.href;
-  out.confirmed = /candidature\s+est\s+envoy|candidature\s+envoy/i.test(text);
-  out.textPreview = text.replace(/\s+/g, ' ').slice(0, 500);
+  out.confirmed = /candidature\\s+est\\s+envoy|candidature\\s+envoy/i.test(text);
+  out.textPreview = text.replace(/\\s+/g, ' ').slice(0, 500);
   return JSON.stringify(out);
 }})()
 """
@@ -319,6 +330,28 @@ def _create_sent_deck_card(
     return create_offer_card(conn, offer_id, endpoint=endpoint, stack_id=stack_id, dry_run=dry_run)
 
 
+SUBMITTED_APPLICATION_STATUSES = ("sent", "submitted", "followup", "response", "interview")
+SUBMITTED_OFFER_STATUSES = ("applied", "sent", "followup", "response", "interview")
+
+
+def _ensure_not_already_submitted(conn, offer_id: int) -> None:
+    offer = get_offer(conn, offer_id)
+    if offer is not None and str(offer["status"] or "") in SUBMITTED_OFFER_STATUSES:
+        raise ValueError(f"Candidature HelloWork déjà envoyée pour l'offre #{offer_id}")
+    placeholders = ",".join("?" for _ in SUBMITTED_APPLICATION_STATUSES)
+    existing = conn.execute(
+        f"""
+        SELECT id FROM applications
+        WHERE offer_id = ? AND status IN ({placeholders})
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (offer_id, *SUBMITTED_APPLICATION_STATUSES),
+    ).fetchone()
+    if existing is not None:
+        raise ValueError(f"Candidature HelloWork déjà envoyée pour l'offre #{offer_id}")
+
+
 def _record_sent_application(conn, offer_id: int, *, notes: str) -> int:
     existing = conn.execute(
         """
@@ -332,7 +365,7 @@ def _record_sent_application(conn, offer_id: int, *, notes: str) -> int:
     if existing is not None:
         application_id = int(existing["id"])
         conn.execute(
-            "UPDATE applications SET status = ?, last_contact_at = CURRENT_TIMESTAMP, notes = ? WHERE id = ?",
+            "UPDATE applications SET status = ?, applied_at = CURRENT_TIMESTAMP, last_contact_at = CURRENT_TIMESTAMP, notes = ? WHERE id = ?",
             ("sent", notes, application_id),
         )
         update_offer_status(conn, offer_id, "sent")
@@ -357,8 +390,10 @@ def apply_hellowork(
     kanban: bool = True,
     kanban_stack: str = "",
     kanban_endpoint: str = "",
+    ack_dissuasion: bool = False,
 ) -> HelloWorkApplyResult:
-    init_db(conn)
+    if submit:
+        _ensure_not_already_submitted(conn, offer_id)
     form = inspect_hellowork_form(
         conn,
         offer_id,
@@ -384,6 +419,9 @@ def apply_hellowork(
         if not form.submit_button_present:
             missing.append("bouton submit")
         raise ValueError("Formulaire HelloWork incomplet: " + ", ".join(missing))
+    if submit and form.dissuasion_required and not ack_dissuasion:
+        skills = ", ".join(form.dissuasion_skills) or "non précisées"
+        raise ValueError(f"Dissuasion HelloWork détectée ({skills}); ajoute --ack-dissuasion pour confirmer l'envoi")
     if not submit:
         add_offer_event(
             conn,
@@ -403,7 +441,26 @@ def apply_hellowork(
                 ensure_ascii=False,
             ),
         )
-        deck = _create_sent_deck_card(conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=True) if kanban else None
+        deck = None
+        if kanban:
+            try:
+                deck = _create_sent_deck_card(conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=True)
+            except Exception as error:
+                add_offer_event(
+                    conn,
+                    offer_id,
+                    event_type="nextcloud_deck_preview_failed",
+                    message="Prévisualisation carte Deck HelloWork non disponible",
+                    payload_json=json.dumps(
+                        {
+                            "source": "hellowork",
+                            "url": form.url,
+                            "external_offer_id": form.offer_external_id,
+                            "error": str(error),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
         return HelloWorkApplyResult(
             offer_id=offer_id,
             url=form.url,
@@ -414,12 +471,6 @@ def apply_hellowork(
             form=form,
             deck_card=deck,
         )
-    already_sent = conn.execute(
-        "SELECT id FROM applications WHERE offer_id = ? AND status = 'sent' ORDER BY id DESC LIMIT 1",
-        (offer_id,),
-    ).fetchone()
-    if already_sent is not None:
-        raise ValueError(f"Candidature HelloWork déjà envoyée pour l'offre #{offer_id}")
     final_motivation = motivation if motivation else _read_draft_message(offer_id, drafts_dir=drafts_dir)
     data = _json_from_browser_result(
         browser.console_eval(_submit_expression(form.offer_external_id, final_motivation), site=site, profile=profile)
@@ -446,7 +497,27 @@ def apply_hellowork(
             ensure_ascii=False,
         ),
     )
-    deck = _create_sent_deck_card(conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=False) if kanban else None
+    deck = None
+    if kanban:
+        try:
+            deck = _create_sent_deck_card(conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=False)
+        except Exception as error:
+            add_offer_event(
+                conn,
+                offer_id,
+                event_type="nextcloud_deck_card_failed",
+                message="Carte Deck non créée après candidature HelloWork envoyée",
+                payload_json=json.dumps(
+                    {
+                        "source": "hellowork",
+                        "url": form.url,
+                        "external_offer_id": form.offer_external_id,
+                        "application_id": application_id,
+                        "error": str(error),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
     return HelloWorkApplyResult(
         offer_id=offer_id,
         url=form.url,

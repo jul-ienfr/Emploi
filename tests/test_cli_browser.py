@@ -1,12 +1,18 @@
 import json
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from emploi.cli import app
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def clean_managed_browser_timeout(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", raising=False)
 
 
 def test_browser_status_prints_json(monkeypatch):
@@ -94,6 +100,8 @@ def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
         'emploi-candidature',
         '--site',
         'france-travail',
+        '--label',
+        'jobs',
         '--json',
     ]
     assert calls[1] == [
@@ -121,6 +129,39 @@ def test_browser_unavailable_shows_clear_error_without_traceback(monkeypatch):
 
     assert result.exit_code != 0
     assert 'Managed Browser command not found' in result.stdout
+    assert 'Traceback' not in result.stdout
+    assert isinstance(result.exception, SystemExit)
+
+
+def test_browser_status_invalid_timeout_shows_clear_error_without_traceback(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    monkeypatch.setenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", "slow")
+    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+
+    result = runner.invoke(app, ['browser', 'status'])
+
+    assert result.exit_code != 0
+    assert 'EMPLOI_MANAGED_BROWSER_TIMEOUT' in result.stdout
+    assert 'Traceback' not in result.stdout
+    assert isinstance(result.exception, SystemExit)
+
+
+def test_browser_status_subprocess_timeout_shows_clear_error_without_traceback(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    monkeypatch.setenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", "3")
+    def fake_run(args, **kwargs):
+        assert kwargs['timeout'] == 3.0
+        raise subprocess.TimeoutExpired(args, kwargs['timeout'])
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+
+    result = runner.invoke(app, ['browser', 'status'])
+
+    assert result.exit_code != 0
+    assert 'timed out after' in result.stdout
     assert 'Traceback' not in result.stdout
     assert isinstance(result.exception, SystemExit)
 

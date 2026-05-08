@@ -88,7 +88,7 @@ def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
     assert '%2334' not in browser.opened[0][0]
 
 
-def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(tmp_path):
+def test_search_offers_marks_only_extracted_existing_offers_inactive_when_excluded_by_profile(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
     spl_id = add_offer(
@@ -150,10 +150,12 @@ def test_search_offers_marks_existing_offers_inactive_when_excluded_by_profile(t
     )
 
     assert [result.title for result in results] == ["Chauffeur de poids lourd (H/F)"]
-    for offer_id in (spl_id, old_responsable_id):
-        excluded = get_offer(conn, offer_id)
-        assert excluded["is_active"] == 0
-        assert excluded["status"] == "archived"
+    excluded = get_offer(conn, spl_id)
+    assert excluded["is_active"] == 0
+    assert excluded["status"] == "archived"
+    unrelated = get_offer(conn, old_responsable_id)
+    assert unrelated["is_active"] == 1
+    assert unrelated["status"] == "new"
 
 
 def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):
@@ -192,6 +194,45 @@ def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):
     assert offer["browser_url"].endswith("ABC123")
     assert offer["raw_browser_snapshot"]
     assert offer["score"] >= 0
+
+
+def test_search_offers_enriches_existing_browser_url_match_with_external_id(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Technicien support ancien",
+        company="Acme",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+        external_source="",
+        external_id="",
+        is_active=True,
+    )
+    browser = FakeBrowser(
+        [
+            {
+                "url": "https://candidat.francetravail.fr/offres/recherche?motsCles=support",
+                "cards": [
+                    {
+                        "title": "Technicien support",
+                        "company": "Acme",
+                        "location": "Annecy",
+                        "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+                        "description": "Support informatique",
+                    }
+                ],
+                "text": "Technicien support Acme Annecy",
+            }
+        ]
+    )
+
+    results = search_offers(conn, query="support", location="Annecy", browser=browser)
+
+    assert results[0].offer_id == offer_id
+    assert results[0].created is False
+    offer = get_offer(conn, offer_id)
+    assert offer["external_source"] == "france-travail"
+    assert offer["external_id"] == "ABC123"
 
 
 def test_search_offers_filters_live_dom_by_requested_radius(tmp_path):

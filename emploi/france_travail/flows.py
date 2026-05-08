@@ -166,9 +166,15 @@ def _find_existing(conn, offer: ExtractedOffer):
         if row:
             return row
     if offer.browser_url:
-        return conn.execute(
+        row = conn.execute(
             "SELECT * FROM offers WHERE external_source = ? AND browser_url = ?",
             (EXTERNAL_SOURCE, offer.browser_url),
+        ).fetchone()
+        if row:
+            return row
+        return conn.execute(
+            "SELECT * FROM offers WHERE external_source = '' AND browser_url = ?",
+            (offer.browser_url,),
         ).fetchone()
     return None
 
@@ -241,71 +247,33 @@ def _mark_existing_excluded_offers_inactive(
         for offer in relevant
         if offer.external_id or offer.browser_url
     }
-    archived_ids: set[int] = set()
     for offer in extracted:
         key = offer.external_id or offer.browser_url
         if not key or key in relevant_keys:
             continue
         existing = _find_existing(conn, offer)
         if existing:
-            offer_id = int(existing["id"])
-            _archive_excluded_existing_offer(conn, offer_id)
-            archived_ids.add(offer_id)
-
-    for row in conn.execute(
-        """
-        SELECT * FROM offers
-        WHERE external_source = ?
-          AND is_active = 1
-          AND status NOT IN ('applied', 'draft', 'rejected', 'archived')
-        """,
-        (EXTERNAL_SOURCE,),
-    ).fetchall():
-        offer_id = int(row["id"])
-        if offer_id in archived_ids:
-            continue
-        stored_offer = ExtractedOffer(
-            title=row["title"] or "",
-            company=row["company"] or "",
-            location=row["location"] or "",
-            description=row["description"] or "",
-            contract_type=row["contract_type"] or "",
-            raw_text=row["raw_extracted_text"] or "",
-            browser_url=row["browser_url"] or row["url"] or "",
-            external_id=row["external_id"] or "",
-            apply_url=row["apply_url"] or "",
-        )
-        if not _offer_is_relevant(
-            stored_offer,
-            query=query,
-            contract=contract,
-            origin_location=origin_location,
-            requested_radius=requested_radius,
-        ):
-            _archive_excluded_existing_offer(conn, offer_id)
+            _archive_excluded_existing_offer(conn, int(existing["id"]))
     conn.commit()
 
 
 def _upsert_extracted_offer(conn, offer: ExtractedOffer, snapshot_payload: dict) -> SearchImportResult:
     timestamp = _now()
     raw_snapshot = _raw_json(snapshot_payload)
-    scored = score_offer(
-        {
-            "title": offer.title,
-            "company": offer.company,
-            "location": offer.location,
-            "description": offer.description,
-        }
-    )
     existing = _find_existing(conn, offer)
+    merged = dict(existing) if existing else {}
+    merged.update({"title": offer.title, "company": offer.company, "location": offer.location, "description": offer.description})
+    scored = score_offer(merged)
     if existing:
+        external_id = offer.external_id or str(existing["external_id"] or "")
+        apply_url = offer.apply_url or str(existing["apply_url"] or "")
         conn.execute(
             """
             UPDATE offers
             SET title = ?, company = ?, location = ?, url = ?, source = ?, description = ?,
-                salary = ?, remote = ?, contract_type = ?, score = ?, score_reasons = ?,
-                browser_url = ?, apply_url = ?, is_active = 1, last_seen_at = ?,
-                raw_browser_snapshot = ?, raw_extracted_text = ?, updated_at = CURRENT_TIMESTAMP
+                salary = ?, remote = ?, contract_type = ?, external_source = ?, external_id = ?,
+                score = ?, score_reasons = ?, browser_url = ?, apply_url = ?, is_active = 1,
+                last_seen_at = ?, raw_browser_snapshot = ?, raw_extracted_text = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (
@@ -318,10 +286,12 @@ def _upsert_extracted_offer(conn, offer: ExtractedOffer, snapshot_payload: dict)
                 offer.salary,
                 offer.remote,
                 offer.contract_type,
+                EXTERNAL_SOURCE,
+                external_id,
                 scored.score,
                 "\n".join(scored.reasons),
                 offer.browser_url,
-                offer.apply_url,
+                apply_url,
                 timestamp,
                 raw_snapshot,
                 offer.raw_text,

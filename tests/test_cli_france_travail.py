@@ -1,13 +1,19 @@
 import json
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from emploi.cli import app
-from emploi.db import add_offer, connect, init_db, list_offer_events
+from emploi.db import add_offer, connect, init_db, list_applications, list_offer_events
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def clean_managed_browser_timeout(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", raising=False)
 
 
 def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
@@ -115,6 +121,34 @@ def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
     assert "ouverte" in open_result.stdout
     assert any(call[1:3] == ["lifecycle", "open"] for call in opened)
     assert not any(call[1] == "navigate" for call in opened)
+
+
+def test_ft_apply_submit_is_rejected_without_managed_browser_or_records(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    conn = connect(db_path)
+    init_db(conn)
+    offer_id = add_offer(
+        conn,
+        title="Support",
+        external_source="france-travail",
+        browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+    )
+
+    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(app, ["ft", "apply", str(offer_id), "--submit"])
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    with connect(db_path) as verify_conn:
+        assert list_offer_events(verify_conn, offer_id) == []
+        assert list_applications(verify_conn) == []
+
 
 
 def test_ft_apply_partner_opens_selected_external_partner(tmp_path, monkeypatch):

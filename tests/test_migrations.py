@@ -27,10 +27,33 @@ EXPECTED_OFFER_COLUMNS = {
     "raw_extracted_text",
 }
 EXPECTED_APPLICATION_COLUMNS = {"draft_path"}
+EXPECTED_INDEXES = {
+    "idx_applications_offer_status_id",
+    "idx_applications_status_contact_id",
+    "idx_applications_status_next_action_id",
+    "idx_auto_apply_runs_profile_period",
+    "idx_offer_events_offer_id_created",
+    "idx_offers_active_score_id",
+    "idx_offers_active_status_score_id",
+    "idx_offers_external_source_id",
+    "idx_offers_source_active_score_id",
+    "idx_offers_source_active_status_id",
+    "idx_offers_source_browser_url",
+    "idx_offers_status",
+    "idx_offers_url_id",
+    "idx_saved_searches_enabled_name",
+}
 
 
 def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _index_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+    }
 
 
 def _create_legacy_schema(conn: sqlite3.Connection) -> None:
@@ -88,9 +111,35 @@ def test_migrate_upgrades_existing_db_idempotently(tmp_path):
         _column_names(conn, "offer_events")
     )
 
+    assert EXPECTED_INDEXES.issubset(_index_names(conn))
+
     legacy_offer = conn.execute("SELECT * FROM offers WHERE title = 'Legacy offer'").fetchone()
     assert legacy_offer["is_active"] == 1
     assert legacy_offer["external_source"] == ""
+
+
+def test_migrate_backfills_external_source_from_legacy_source(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    _create_legacy_schema(conn)
+    conn.execute("UPDATE offers SET source = ? WHERE title = ?", ("linkedin", "Legacy offer"))
+    conn.commit()
+
+    migrate(conn)
+
+    legacy_offer = conn.execute("SELECT * FROM offers WHERE title = 'Legacy offer'").fetchone()
+    assert legacy_offer["source"] == "linkedin"
+    assert legacy_offer["external_source"] == "linkedin"
+
+
+def test_migrate_does_not_commit_outer_transaction(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    _create_legacy_schema(conn)
+    conn.execute("INSERT INTO offers (title, company) VALUES (?, ?)", ("Outer", "Tx"))
+
+    migrate(conn)
+    conn.rollback()
+
+    assert conn.execute("SELECT COUNT(*) FROM offers WHERE title = 'Outer'").fetchone()[0] == 0
 
 
 def test_init_db_runs_migrations_for_new_databases(tmp_path):
@@ -103,6 +152,7 @@ def test_init_db_runs_migrations_for_new_databases(tmp_path):
     assert "browser_sessions" in {
         row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     }
+    assert EXPECTED_INDEXES.issubset(_index_names(conn))
 
 
 def test_external_source_id_unique_when_external_id_present(tmp_path):
@@ -116,6 +166,39 @@ def test_external_source_id_unique_when_external_id_present(tmp_path):
     first_empty = add_offer(conn, title="Empty 1", external_source="france_travail", external_id="")
     second_empty = add_offer(conn, title="Empty 2", external_source="france_travail", external_id="")
     assert first_empty != second_empty
+
+
+def test_migrate_rejects_legacy_duplicate_external_ids_before_index(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    _create_legacy_schema(conn)
+    conn.execute("ALTER TABLE offers ADD COLUMN external_source TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE offers ADD COLUMN external_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "UPDATE offers SET external_source = ?, external_id = ? WHERE title = ?",
+        ("france_travail", "123", "Legacy offer"),
+    )
+    conn.execute(
+        "INSERT INTO offers (title, company, external_source, external_id) VALUES (?, ?, ?, ?)",
+        ("Duplicate legacy offer", "Legacy Co", "france_travail", "123"),
+    )
+    conn.commit()
+
+    with pytest.warns(UserWarning, match="idx_offers_external_source_id") as warnings:
+        migrate(conn)
+
+    assert len(warnings) == 1
+    message = str(warnings[0].message)
+    assert "source='france_travail'" in message
+    assert "external_id='123'" in message
+    assert "count=2" in message
+    assert "Deduplicate" in message
+    assert conn.execute("SELECT COUNT(*) FROM offers WHERE external_id = '123'").fetchone()[0] == 2
+    # New columns and tables are created even with duplicates (migration continues)
+    assert "browser_url" in _column_names(conn, "offers")
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "browser_sessions" in tables
+    # But the unique index is skipped
+    assert "idx_offers_external_source_id" not in _index_names(conn)
 
 
 def test_add_offer_persists_browser_fields(tmp_path):

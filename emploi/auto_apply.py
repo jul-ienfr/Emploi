@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from uuid import uuid4
 from pathlib import Path
 
 from emploi.applications import create_application_draft
 from emploi.db import add_offer_event, get_saved_search, list_saved_searches
+from emploi.france_travail.flows import _matches_terms
 
 
 @dataclass(frozen=True)
@@ -23,10 +25,10 @@ class AutoApplyRunResult:
 
 
 def period_key(period: str, today: str | None = None) -> str:
-    today_date = date.fromisoformat(today) if today else date.today()
     normalized = period.strip().lower()
     if normalized == "run":
-        return f"run:{today_date.isoformat()}"
+        return f"run:{uuid4().hex}"
+    today_date = date.fromisoformat(today) if today else date.today()
     if normalized == "daily":
         return f"daily:{today_date.isoformat()}"
     if normalized == "weekly":
@@ -63,20 +65,40 @@ def _candidate_order(strategy: str) -> str:
 
 def _select_candidate(conn, saved, *, strategy: str, min_score: int):
     order_by = _candidate_order(strategy)
-    return conn.execute(
+    filters = [
+        "offers.external_source = 'france-travail'",
+        "offers.is_active = 1",
+        "offers.score >= ?",
+        "offers.status NOT IN ('draft', 'applied', 'sent', 'followup', 'response', 'rejected', 'interview', 'archived')",
+        "NOT EXISTS (SELECT 1 FROM applications WHERE applications.offer_id = offers.id)",
+    ]
+    params: list[object] = [min_score]
+    query = str(saved["query"] or "").strip()
+    contract = str(saved["contract"] or "").strip().lower()
+    if contract:
+        filters.append("LOWER(offers.contract_type) LIKE ?")
+        params.append(f"%{contract}%")
+    where_tokens = [token for token in str(saved["where_text"] or "").strip().lower().split() if len(token) >= 3]
+    if where_tokens:
+        filters.append("(" + " OR ".join(["LOWER(offers.location) LIKE ?"] * len(where_tokens)) + ")")
+        params.extend(f"%{token}%" for token in where_tokens)
+    where_clause = "\n          AND ".join(filters)
+    candidates = conn.execute(
         f"""
         SELECT offers.*
         FROM offers
-        WHERE offers.external_source = 'france-travail'
-          AND offers.is_active = 1
-          AND offers.score >= ?
-          AND offers.status NOT IN ('draft', 'applied', 'sent', 'followup', 'response', 'rejected', 'interview', 'archived')
-          AND NOT EXISTS (SELECT 1 FROM applications WHERE applications.offer_id = offers.id)
+        WHERE {where_clause}
         ORDER BY {order_by}
-        LIMIT 1
         """,
-        (min_score,),
-    ).fetchone()
+        params,
+    ).fetchall()
+    if not query:
+        return candidates[0] if candidates else None
+    for candidate in candidates:
+        text = " ".join([candidate["title"] or "", candidate["description"] or "", candidate["company"] or ""])
+        if _matches_terms(text, query):
+            return candidate
+    return None
 
 
 def _record_run(

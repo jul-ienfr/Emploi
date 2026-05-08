@@ -7,6 +7,11 @@ from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserCommandError, ManagedBrowserUnavailableError
 
 
+@pytest.fixture(autouse=True)
+def clean_managed_browser_timeout(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", raising=False)
+
+
 class FakeRunner:
     def __init__(self, stdout='{}', returncode=0, stderr=''):
         self.stdout = stdout
@@ -41,6 +46,7 @@ def test_status_builds_default_command_and_parses_json(monkeypatch):
     assert runner.calls[0][1]['capture_output'] is True
     assert runner.calls[0][1]['text'] is True
     assert runner.calls[0][1]['check'] is False
+    assert runner.calls[0][1]['timeout'] == 60
 
 
 def test_open_uses_navigate_command_with_url_and_custom_context(monkeypatch):
@@ -125,6 +131,8 @@ def test_snapshot_and_checkpoint_command_construction(monkeypatch):
         'emploi-candidature',
         '--site',
         'france-travail',
+        '--label',
+        'search-results',
         '--json',
     ]
     assert runner.calls[1][0] == [
@@ -149,6 +157,51 @@ def test_command_from_environment(monkeypatch):
 
     assert runner.calls[0][0][0] == 'custom-managed-browser'
 
+
+
+def test_timeout_from_environment(monkeypatch):
+    runner = FakeRunner(stdout=json.dumps({'ok': True}))
+    monkeypatch.setenv('EMPLOI_MANAGED_BROWSER_TIMEOUT', '12.5')
+
+    ManagedBrowserClient(runner=runner).status()
+
+    assert runner.calls[0][1]['timeout'] == 12.5
+
+
+def test_explicit_timeout_overrides_environment(monkeypatch):
+    runner = FakeRunner(stdout=json.dumps({'ok': True}))
+    monkeypatch.setenv('EMPLOI_MANAGED_BROWSER_TIMEOUT', '12.5')
+
+    ManagedBrowserClient(runner=runner, timeout=4).status()
+
+    assert runner.calls[0][1]['timeout'] == 4.0
+
+
+def test_invalid_timeout_environment_raises_command_error(monkeypatch):
+    monkeypatch.setenv('EMPLOI_MANAGED_BROWSER_TIMEOUT', 'slow')
+
+    with pytest.raises(ManagedBrowserCommandError) as excinfo:
+        ManagedBrowserClient(runner=FakeRunner())
+
+    assert 'EMPLOI_MANAGED_BROWSER_TIMEOUT' in str(excinfo.value)
+
+
+def test_non_positive_timeout_raises_command_error(monkeypatch):
+    monkeypatch.delenv('EMPLOI_MANAGED_BROWSER_TIMEOUT', raising=False)
+
+    with pytest.raises(ManagedBrowserCommandError) as excinfo:
+        ManagedBrowserClient(runner=FakeRunner(), timeout=0)
+
+    assert 'positive' in str(excinfo.value)
+
+
+def test_non_finite_timeout_raises_command_error(monkeypatch):
+    monkeypatch.setenv('EMPLOI_MANAGED_BROWSER_TIMEOUT', 'nan')
+
+    with pytest.raises(ManagedBrowserCommandError) as excinfo:
+        ManagedBrowserClient(runner=FakeRunner())
+
+    assert 'finite positive' in str(excinfo.value)
 
 
 def test_command_from_environment_accepts_shell_like_node_script(monkeypatch):
@@ -181,7 +234,29 @@ def test_nonzero_exit_raises_command_error(monkeypatch):
         client.status()
 
     assert 'boom' in str(excinfo.value)
+    assert 'subcommand=status' in str(excinfo.value)
+    assert 'site=france-travail' in str(excinfo.value)
+    assert 'profile=emploi-candidature' in str(excinfo.value)
+    assert 'returncode=2' in str(excinfo.value)
     assert excinfo.value.returncode == 2
+
+
+def test_timeout_raises_command_error(monkeypatch):
+    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    monkeypatch.setenv('EMPLOI_MANAGED_BROWSER_TIMEOUT', '3')
+
+    def timeout_runner(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs['timeout'], output='partial out', stderr='partial err')
+
+    client = ManagedBrowserClient(runner=timeout_runner)
+
+    with pytest.raises(ManagedBrowserCommandError) as excinfo:
+        client.status()
+
+    assert 'timed out after 3s' in str(excinfo.value)
+    assert 'subcommand=status' in str(excinfo.value)
+    assert 'stdout=' in str(excinfo.value)
+    assert 'stderr=' in str(excinfo.value)
 
 
 def test_invalid_json_raises_command_error(monkeypatch):
@@ -193,3 +268,5 @@ def test_invalid_json_raises_command_error(monkeypatch):
         client.status()
 
     assert 'Invalid JSON' in str(excinfo.value)
+    assert 'subcommand=status' in str(excinfo.value)
+    assert 'stdout=' in str(excinfo.value)

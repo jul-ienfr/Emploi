@@ -15,8 +15,11 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     accounts = _check_accounts()
     managed_browser = _check_managed_browser(probe=probe_browser)
 
+    managed_browser_ok = managed_browser["status"] == "ok" or (
+        managed_browser["status"] == "available" and managed_browser.get("probe") == "skipped"
+    )
     status = "ok"
-    if database["status"] != "ok" or managed_browser["status"] != "ok":
+    if database["status"] != "ok" or accounts["status"] != "ok" or not managed_browser_ok:
         status = "degraded"
 
     actions: list[str] = []
@@ -24,7 +27,7 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
         actions.append("Corriger l'accès à la base SQLite ou définir EMPLOI_DB vers un chemin writable.")
     if managed_browser["status"] == "missing":
         actions.append("Installer/configurer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND.")
-    elif managed_browser["status"] != "ok":
+    elif not managed_browser_ok:
         actions.append("Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser (défaut: emploi-candidature/france-travail) est disponible et connecté.")
     if accounts.get("status") != "ok":
         actions.append(f"Configurer les comptes France Travail : créer ~/.config/emploi/accounts.json avec les deux profils (candidature, officiel).")
@@ -76,8 +79,21 @@ def _check_accounts() -> dict[str, Any]:
 
 
 def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
-    client = ManagedBrowserClient()
-    executable = shutil.which(client.command)
+    try:
+        client = ManagedBrowserClient()
+    except ManagedBrowserError as exc:
+        return {
+            "status": "error",
+            "available": False,
+            "probe": "not_run",
+            "can_run_smoke": False,
+            "command": None,
+            "path": None,
+            "error": str(exc),
+            "remediation": "Définir EMPLOI_MANAGED_BROWSER_TIMEOUT avec un nombre de secondes positif, par exemple 60.",
+        }
+    executable_name = client.command_parts[0] if client.command_parts else client.command
+    executable = shutil.which(executable_name)
     if executable is None:
         return {
             "status": "missing",
@@ -86,7 +102,7 @@ def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
             "can_run_smoke": False,
             "command": client.command,
             "path": None,
-            "error": f"Command not found: {client.command}",
+            "error": f"Command not found: {executable_name}",
             "remediation": "Installer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND vers l'exécutable correct, puis lancer `emploi browser smoke --json`.",
         }
     result: dict[str, Any] = {

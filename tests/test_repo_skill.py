@@ -13,7 +13,7 @@ def test_repo_contains_hermes_skill_for_emploi_cli():
     assert "emploi search-profile run --all" in content
     assert "emploi ft apply" in content
     assert "emploi ft apply 1 --partner hellowork" in content
-    assert "emploi hellowork apply 1 --submit" in content
+    assert "emploi hellowork apply 1 --submit --yes" in content
     assert "application_submitted" in content
     assert "candidature-envoyee" in content
     assert "ne soumet jamais automatiquement" in content
@@ -37,7 +37,7 @@ def test_repo_skill_includes_hellowork_application_flow_reference():
     reference = PROJECT_ROOT / "skills" / "emploi-cli" / "references" / "hellowork-application-flow.md"
     assert reference.exists()
     content = reference.read_text()
-    assert "emploi hellowork apply OFFER_ID --submit" in content
+    assert "emploi hellowork apply OFFER_ID --submit --yes" in content
     assert "candidature-envoyee" in content
     assert "application_submitted" in content
     assert "FunnelId" in content
@@ -61,7 +61,7 @@ def test_readme_documents_current_france_travail_managed_browser_contract():
 def test_readme_documents_hellowork_submit_and_kanban_contract():
     readme = (PROJECT_ROOT / "README.md").read_text()
     assert "emploi hellowork apply 1" in readme
-    assert "emploi hellowork apply 1 --submit" in readme
+    assert "emploi hellowork apply 1 --submit --yes" in readme
     assert "application_submitted" in readme
     assert "candidature-envoyee" in readme
     assert "FunnelId" in readme

@@ -92,7 +92,7 @@ def import_offers_file(
     source: str,
     file_format: str = "auto",
 ) -> ImportSummary:
-    source_name = source.strip()
+    source_name = source.strip().lower()
     if not source_name:
         raise ValueError("La source est obligatoire")
     resolved = Path(path)
@@ -135,7 +135,7 @@ def normalize_offer(raw: dict[str, Any], *, source: str) -> dict[str, str]:
     for field_name in OFFER_FIELDS:
         value = raw.get(field_name, "")
         normalized[field_name] = "" if value is None else str(value).strip()
-    normalized["source"] = normalized["source"] or source
+    normalized["source"] = (normalized["source"] or source).lower()
     normalized["external_source"] = source
     return normalized
 
@@ -155,7 +155,16 @@ def find_existing_offer(
         if row is not None:
             return row
     if url:
-        return conn.execute("SELECT * FROM offers WHERE url = ? ORDER BY id DESC LIMIT 1", (url,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM offers WHERE external_source = ? AND url = ? ORDER BY id DESC LIMIT 1",
+            (source, url),
+        ).fetchone()
+        if row is not None:
+            return row
+        return conn.execute(
+            "SELECT * FROM offers WHERE external_source = '' AND source = ? AND url = ? ORDER BY id DESC LIMIT 1",
+            (source, url),
+        ).fetchone()
     return None
 
 
@@ -163,7 +172,11 @@ def update_imported_offer(conn: sqlite3.Connection, offer_id: int, data: dict[st
     existing = get_offer(conn, offer_id)
     if existing is None:
         raise ValueError(f"Offre introuvable: {offer_id}")
-    scored = score_offer({**dict(existing), **data})
+    update_data = dict(data)
+    for field_name in ("company", "location", "description", "salary", "remote", "contract_type", "notes", "external_id", "url"):
+        if not update_data[field_name]:
+            update_data[field_name] = str(existing[field_name] or "")
+    scored = score_offer({**dict(existing), **update_data})
     conn.execute(
         """
         UPDATE offers
@@ -173,18 +186,18 @@ def update_imported_offer(conn: sqlite3.Connection, offer_id: int, data: dict[st
         WHERE id = ?
         """,
         (
-            data["title"],
-            data["company"],
-            data["location"],
-            data["url"],
-            data["source"],
-            data["description"],
-            data["salary"],
-            data["remote"],
-            data["contract_type"],
-            data["notes"],
-            data["external_source"],
-            data["external_id"],
+            update_data["title"],
+            update_data["company"],
+            update_data["location"],
+            update_data["url"],
+            update_data["source"],
+            update_data["description"],
+            update_data["salary"],
+            update_data["remote"],
+            update_data["contract_type"],
+            update_data["notes"],
+            update_data["external_source"],
+            update_data["external_id"],
             scored.score,
             "\n".join(scored.reasons),
             offer_id,
@@ -193,7 +206,7 @@ def update_imported_offer(conn: sqlite3.Connection, offer_id: int, data: dict[st
     conn.commit()
 
 
-def _read_rows(path: Path, file_format: str) -> list[dict[str, Any]]:
+def _read_rows(path: Path, file_format: str) -> Iterable[dict[str, Any]]:
     if not path.exists():
         raise ValueError(f"Fichier introuvable: {path}")
     if file_format == "json":
@@ -201,9 +214,14 @@ def _read_rows(path: Path, file_format: str) -> list[dict[str, Any]]:
             payload = json.load(handle)
         return _rows_from_json(payload)
     if file_format == "csv":
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            return [dict(row) for row in csv.DictReader(handle)]
+        return _read_csv_rows(path)
     raise ValueError("Format import invalide: utilise auto, json ou csv")
+
+
+def _read_csv_rows(path: Path) -> Iterable[dict[str, Any]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            yield dict(row)
 
 
 def _rows_from_json(payload: Any) -> list[dict[str, Any]]:

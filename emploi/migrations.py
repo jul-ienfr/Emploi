@@ -18,7 +18,7 @@ def _execute_script(conn: sqlite3.Connection, script: str) -> None:
             conn.execute(statement)
 
 
-def _ensure_unique_external_ids(conn: sqlite3.Connection) -> None:
+def _ensure_unique_external_ids(conn: sqlite3.Connection) -> int:
     duplicate = conn.execute(
         """
         SELECT external_source, external_id, COUNT(*) AS duplicate_count
@@ -31,11 +31,14 @@ def _ensure_unique_external_ids(conn: sqlite3.Connection) -> None:
         """
     ).fetchone()
     if duplicate:
-        raise ValueError(
+        import warnings
+        warnings.warn(
             "Cannot create idx_offers_external_source_id: duplicate external offer ids found "
             f"(source={duplicate[0]!r}, external_id={duplicate[1]!r}, count={duplicate[2]}). "
-            "Deduplicate these offers or clear duplicate external_id values before migrating."
+            "Deduplicate these offers or clear duplicate external_id values to enable the index."
         )
+        return duplicate[2]
+    return 0
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -61,14 +64,14 @@ def migrate(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "offers", "raw_browser_snapshot", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "offers", "raw_extracted_text", "TEXT NOT NULL DEFAULT ''")
 
-        _ensure_unique_external_ids(conn)
-        conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_offers_external_source_id
-            ON offers (external_source, external_id)
-            WHERE external_id IS NOT NULL AND external_id != ''
-            """
-        )
+        if not _ensure_unique_external_ids(conn):
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_offers_external_source_id
+                ON offers (external_source, external_id)
+                WHERE external_id IS NOT NULL AND external_id != ''
+                """
+            )
 
         _execute_script(
             conn,
@@ -136,7 +139,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "applications", "status", "TEXT NOT NULL DEFAULT 'draft'")
         _add_column_if_missing(conn, "applications", "next_action_at", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "applications", "last_contact_at", "TEXT NOT NULL DEFAULT ''")
-        _add_column_if_missing(conn, "applications", "applied_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "applications", "applied_at", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
         _execute_script(
             conn,
             """

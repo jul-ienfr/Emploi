@@ -460,9 +460,12 @@ def nextcloud_tasks_list(json_output: bool = typer.Option(False, "--json", help=
 
 
 @app.command()
-def doctor(json_output: bool = typer.Option(False, "--json", help="Afficher un diagnostic JSON parseable")) -> None:
+def doctor(
+    json_output: bool = typer.Option(False, "--json", help="Afficher un diagnostic JSON parseable"),
+    probe_browser: bool = typer.Option(True, "--probe-browser/--no-browser-probe", help="Exécuter le probe Managed Browser"),
+) -> None:
     """Diagnostique l'état local du CLI, de SQLite et du Managed Browser."""
-    report = build_doctor_report()
+    report = build_doctor_report(probe_browser=probe_browser)
     if json_output:
         console.print_json(data=report)
         return
@@ -1074,16 +1077,21 @@ def ft_apply(
 def hellowork_apply(
     offer_id: int,
     submit: bool = typer.Option(False, "--submit", help="Envoyer réellement la candidature HelloWork"),
+    yes: bool = typer.Option(False, "--yes", help="Confirme explicitement l'envoi réel HelloWork"),
     url: str = typer.Option("", "--url", help="URL HelloWork explicite si elle n'est pas en base"),
     motivation: str = typer.Option("", "--motivation", help="Message de motivation explicite; vide = brouillon local"),
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
     no_kanban: bool = typer.Option(False, "--no-kanban", help="Ne pas créer/mettre à jour la carte Deck après envoi"),
+    ack_dissuasion: bool = typer.Option(False, "--ack-dissuasion", help="Confirme l'envoi malgré un avertissement compétences HelloWork"),
     kanban_stack: str = typer.Option("", "--kanban-stack", help="Alias/ID stack Deck candidature envoyée"),
     kanban_endpoint: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
     site: str = typer.Option(DEFAULT_SITE, "--site"),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     """Prévisualise ou envoie une candidature HelloWork via Managed Browser."""
+    if submit and not yes:
+        console.print("[red]Error:[/red] --submit HelloWork exige --yes pour confirmer l'envoi réel")
+        raise typer.Exit(1)
     _ensure_option_enabled("managed_browser.enabled")
     try:
         browser = ManagedBrowserClient()
@@ -1102,6 +1110,7 @@ def hellowork_apply(
                 kanban=not no_kanban,
                 kanban_stack=kanban_stack,
                 kanban_endpoint=kanban_endpoint,
+                ack_dissuasion=ack_dissuasion,
             )
     except ManagedBrowserError as error:
         _handle_browser_error(error)
@@ -1128,7 +1137,7 @@ def hellowork_apply(
     elif not no_kanban:
         console.print("Kanban : non configuré ou non applicable en dry-run.")
     if not submit:
-        console.print("Dry-run : aucune candidature envoyée. Ajoute --submit pour envoyer.")
+        console.print("Dry-run : aucune candidature envoyée. Ajoute --submit --yes pour envoyer.")
 
 
 @search_profile_app.command("add")
@@ -1492,6 +1501,7 @@ def application_pipeline(
     include_documents: bool = typer.Option(False, "--include-documents", help="Ajouter CV/LM du profil documents"),
     document_profile_name: str = typer.Option("", "--document-profile", help="Profil documents; vide = défaut"),
     force_card: bool = typer.Option(False, "--force-card", help="Créer une nouvelle carte même si un événement existe déjà"),
+    mark_sent: bool = typer.Option(False, "--mark-sent", help="Enregistrer une candidature envoyée locale avant relance"),
     schedule_followup: bool | None = typer.Option(None, "--schedule-followup/--no-schedule-followup", help="Planifier une relance selon la config ou désactiver pour ce run"),
     followup_after: str = typer.Option("", "--followup-after", help="Délai de relance pour ce run, ex: 7d; vide = config"),
     sync_followup_task: bool | None = typer.Option(None, "--sync-followup-task/--no-sync-followup-task", help="Créer la tâche Nextcloud de relance selon config ou choix du run"),
@@ -1520,6 +1530,33 @@ def application_pipeline(
         stack_id = emploi_config.resolve_kanban_stack(kanban_endpoint, stack)
         with connect() as conn:
             init_db(conn)
+            auto_followup = get_auto_followup_config(conn)
+            should_schedule_followup = bool(auto_followup["enabled"]) if schedule_followup is None else schedule_followup
+            followup_date = ""
+            followup_task_result = None
+            followup_requires_sent = False
+            application_id = None
+            should_sync_followup_task = False
+            tasks_endpoint = None
+            existing_sent = None
+            if should_schedule_followup:
+                delay_days = normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
+                followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
+                if not dry_run:
+                    existing_sent = conn.execute(
+                        "SELECT id FROM applications WHERE offer_id = ? AND status IN ('sent', 'followup') ORDER BY id DESC LIMIT 1",
+                        (offer_id,),
+                    ).fetchone()
+                sync_config = get_followup_sync_config(conn)
+                should_sync_followup_task = bool(sync_config["enabled"]) if sync_followup_task is None else sync_followup_task
+                if should_sync_followup_task and (dry_run or existing_sent is not None or mark_sent):
+                    tasks_endpoint = (
+                        emploi_config.get_nextcloud_tasks_endpoint(tasks_endpoint_name)
+                        if tasks_endpoint_name
+                        else emploi_config.get_default_nextcloud_tasks_endpoint()
+                    )
+                    if tasks_endpoint is None:
+                        raise ValueError("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
             export_result = export_application_to_nextcloud(
                 conn,
                 offer_id,
@@ -1538,26 +1575,24 @@ def application_pipeline(
                 dry_run=dry_run,
                 force=force_card,
             )
-            auto_followup = get_auto_followup_config(conn)
-            should_schedule_followup = bool(auto_followup["enabled"]) if schedule_followup is None else schedule_followup
-            followup_date = ""
-            followup_task_result = None
+            if not dry_run and mark_sent:
+                if existing_sent is None:
+                    existing_sent = conn.execute(
+                        "SELECT id FROM applications WHERE offer_id = ? AND status IN ('sent', 'followup') ORDER BY id DESC LIMIT 1",
+                        (offer_id,),
+                    ).fetchone()
+                application_id = int(existing_sent["id"]) if existing_sent is not None else add_application(conn, offer_id, status="sent")
+                update_offer_status(conn, offer_id, "sent")
             if should_schedule_followup:
-                delay_days = normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
-                followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
                 if not dry_run:
-                    application_id = add_application(conn, offer_id, status="sent")
-                    schedule_application_followup(conn, application_id, followup_date)
-                sync_config = get_followup_sync_config(conn)
-                should_sync_followup_task = bool(sync_config["enabled"]) if sync_followup_task is None else sync_followup_task
-                if should_sync_followup_task:
-                    tasks_endpoint = (
-                        emploi_config.get_nextcloud_tasks_endpoint(tasks_endpoint_name)
-                        if tasks_endpoint_name
-                        else emploi_config.get_default_nextcloud_tasks_endpoint()
-                    )
-                    if tasks_endpoint is None:
-                        raise ValueError("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
+                    if existing_sent is not None and application_id is None:
+                        application_id = int(existing_sent["id"])
+                    if application_id is not None:
+                        schedule_application_followup(conn, application_id, followup_date)
+                    else:
+                        followup_date = ""
+                        followup_requires_sent = True
+                if should_sync_followup_task and (dry_run or application_id is not None):
                     if dry_run:
                         followup_task_result = "dry-run"
                     else:
@@ -1593,6 +1628,8 @@ def application_pipeline(
                 console.print("Tâche déjà enregistrée : aucune nouvelle tâche créée.")
             elif followup_task_result.href:
                 console.print(f"Tâche href : {followup_task_result.href}")
+    elif followup_requires_sent:
+        console.print("Relance : non planifiée (aucune candidature envoyée locale; utilise --mark-sent)")
     elif schedule_followup is False:
         console.print("Relance : ignorée pour ce run")
     else:
