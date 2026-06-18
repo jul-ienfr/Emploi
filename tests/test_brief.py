@@ -1,12 +1,23 @@
 import json
+from unittest.mock import patch as _mock_patch
 
+import pytest
 from typer.testing import CliRunner
 
+from emploi.browser.errors import ManagedBrowserUnavailableError
 from emploi.cli import app
 from emploi.db import add_application, add_offer, add_saved_search, connect, init_db, schedule_application_followup
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _browser_unavailable(monkeypatch):
+    """Simulate Managed Browser being down so brief reports it as a blocker."""
+    def _raise(*a, **kw):
+        raise ManagedBrowserUnavailableError("test: server not running")
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", _raise)
 
 
 def _seed_brief_data(db_path):

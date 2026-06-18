@@ -536,15 +536,16 @@ def add_saved_search(
     contract: str = "",
     enabled: bool = True,
     notes: str = "",
+    source: str = "all",
 ) -> int:
     requested_radius = max(0, int(radius))
     france_travail_radius = france_travail_radius_for(requested_radius)
     cursor = conn.execute(
         """
-        INSERT INTO saved_searches (name, query, where_text, radius, requested_radius, contract, enabled, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO saved_searches (name, query, where_text, radius, requested_radius, contract, enabled, notes, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, query, where_text, france_travail_radius, requested_radius, contract, 1 if enabled else 0, notes),
+        (name, query, where_text, france_travail_radius, requested_radius, contract, 1 if enabled else 0, notes, source),
     )
     conn.commit()
     return int(cursor.lastrowid)

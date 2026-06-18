@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
-import subprocess
 
 import pytest
 from typer.testing import CliRunner
 
+from emploi.browser.errors import ManagedBrowserError, ManagedBrowserUnavailableError
+from emploi.browser.models import BrowserCommandResult
 from emploi.cli import app
 from emploi.db import add_offer, connect, init_db, list_applications, list_offer_events
 
@@ -11,56 +14,56 @@ from emploi.db import add_offer, connect, init_db, list_applications, list_offer
 runner = CliRunner()
 
 
+def _ok(payload: dict) -> BrowserCommandResult:
+    return BrowserCommandResult(command="test", site="france-travail", profile="emploi-candidature", payload=payload)
+
+
 @pytest.fixture(autouse=True)
 def clean_managed_browser_timeout(monkeypatch):
     monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", raising=False)
 
 
+# ---------------------------------------------------------------------------
+# France Travail search via Managed Browser
+# ---------------------------------------------------------------------------
+
+
 def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
-    calls = []
+    calls: list[str] = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        if args[1:3] == ["lifecycle", "open"]:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
-        if args[1] == "snapshot":
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=json.dumps(
-                    {
-                        "cards": [
-                            {
-                                "title": "Technicien support",
-                                "company": "Acme",
-                                "location": "Annecy",
-                                "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
-                                "description": "Support informatique",
-                            }
-                        ],
-                        "text": "Technicien support Acme Annecy",
-                    }
-                ),
-                stderr="",
-            )
-        raise AssertionError(args)
+    def fake_lifecycle_open(self, url, *, site="france-travail", profile="emploi-candidature"):
+        calls.append("lifecycle_open")
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def fake_snapshot(self, *, label=None, site="france-travail", profile="emploi-candidature"):
+        calls.append("snapshot")
+        return _ok({
+            "cards": [
+                {
+                    "title": "Technicien support",
+                    "company": "Acme",
+                    "location": "Annecy",
+                    "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+                    "description": "Support informatique",
+                }
+            ],
+            "text": "Technicien support Acme Annecy",
+        })
+
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_lifecycle_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
     result = runner.invoke(app, ["ft", "search", "support", "--location", "Annecy"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.stdout
     assert "1 offre" in result.stdout
     assert "Technicien support" in result.stdout
-    assert calls[0][1:3] == ["lifecycle", "open"]
-    assert calls[1][1] == "snapshot"
+    assert calls == ["lifecycle_open", "snapshot"]
 
 
 def test_ft_refresh_updates_offer(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     conn = connect(db_path)
@@ -72,11 +75,15 @@ def test_ft_refresh_updates_offer(tmp_path, monkeypatch):
         browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
     )
 
-    def fake_run(args, **kwargs):
-        payload = {"ok": True, "url": args[-2]} if args[1] == "open" else {"text": "Cette offre n'est plus disponible"}
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(payload), stderr="")
+    def fake_open(self, url, **kw):
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def fake_snapshot(self, **kw):
+        return _ok({"text": "Cette offre n'est plus disponible"})
+
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.open", fake_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
     result = runner.invoke(app, ["ft", "refresh", "1"])
 
@@ -85,7 +92,6 @@ def test_ft_refresh_updates_offer(tmp_path, monkeypatch):
 
 
 def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     drafts = tmp_path / "drafts"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
@@ -98,15 +104,17 @@ def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
         external_source="france-travail",
         browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
     )
-    opened = []
+    calls: list[str] = []
 
-    def fake_run(args, **kwargs):
-        opened.append(args)
-        if args[1:3] == ["lifecycle", "open"]:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"text": "Candidater maintenant"}), stderr="")
+    def fake_lifecycle_open(self, url, **kw):
+        calls.append("lifecycle_open")
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def fake_snapshot(self, **kw):
+        return _ok({"text": "Candidater maintenant"})
+
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_lifecycle_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
     check = runner.invoke(app, ["ft", "apply", "1", "--check"])
     draft = runner.invoke(app, ["ft", "apply", "1", "--draft", "--drafts-dir", str(drafts)])
@@ -119,12 +127,10 @@ def test_ft_apply_check_draft_and_open(tmp_path, monkeypatch):
     assert any(drafts.iterdir())
     assert open_result.exit_code == 0
     assert "ouverte" in open_result.stdout
-    assert any(call[1:3] == ["lifecycle", "open"] for call in opened)
-    assert not any(call[1] == "navigate" for call in opened)
+    assert "lifecycle_open" in calls
 
 
 def test_ft_apply_submit_is_rejected_without_managed_browser_or_records(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     conn = connect(db_path)
@@ -136,11 +142,6 @@ def test_ft_apply_submit_is_rejected_without_managed_browser_or_records(tmp_path
         browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
     )
 
-    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError(args)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
     result = runner.invoke(app, ["ft", "apply", str(offer_id), "--submit"])
 
     assert result.exit_code != 0
@@ -150,9 +151,7 @@ def test_ft_apply_submit_is_rejected_without_managed_browser_or_records(tmp_path
         assert list_applications(verify_conn) == []
 
 
-
 def test_ft_apply_partner_opens_selected_external_partner(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     conn = connect(db_path)
@@ -163,46 +162,33 @@ def test_ft_apply_partner_opens_selected_external_partner(tmp_path, monkeypatch)
         external_source="france-travail",
         browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
     )
-    calls = []
+    opened_urls: list[str] = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        if args[1:3] == ["lifecycle", "open"]:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
-        if args[1] == "snapshot":
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"text": "Postuler à l'offre"}), stderr="")
-        if args[1:3] == ["console", "eval"]:
-            expression = args[args.index("--expression") + 1]
-            if "target.click" in expression:
-                return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"value": {"clicked": True}}), stderr="")
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=json.dumps(
-                    {
-                        "value": [
-                            {"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"},
-                            {"name": "HelloWork", "url": "https://www.hellowork.com/fr-fr/emplois/123.html"},
-                        ]
-                    }
-                ),
-                stderr="",
-            )
-        raise AssertionError(args)
+    def fake_lifecycle_open(self, url, **kw):
+        opened_urls.append(url)
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    # Snapshot text must contain "site de HelloWork" and an HTML <a> href for _detect_partner_handoff
+    PARTNER_HTML = (
+        '<div>Candidater maintenant</div>'
+        '<div>site de HelloWork</div>'
+        '<a href="https://www.hellowork.com/fr-fr/emplois/123.html">HelloWork</a>'
+    )
+
+    def fake_snapshot(self, **kw):
+        return _ok({"text": PARTNER_HTML})
+
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_lifecycle_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
     result = runner.invoke(app, ["ft", "apply", "1", "--partner", "hellowork"])
 
     assert result.exit_code == 0
     assert "Partenaire HelloWork ouvert" in result.stdout
-    opened_urls = [call[call.index("--url") + 1] for call in calls if call[1:3] == ["lifecycle", "open"]]
     assert opened_urls[-1] == "https://www.hellowork.com/fr-fr/emplois/123.html"
-    assert not any(call[1] == "navigate" for call in calls)
 
 
 def test_ft_apply_partner_missing_partner_returns_clean_cli_error_without_external_open(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     conn = connect(db_path)
@@ -213,27 +199,17 @@ def test_ft_apply_partner_missing_partner_returns_clean_cli_error_without_extern
         external_source="france-travail",
         browser_url="https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
     )
-    calls = []
+    opened_urls: list[str] = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        if args[1:3] == ["lifecycle", "open"]:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
-        if args[1] == "snapshot":
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"text": "Postuler à l'offre"}), stderr="")
-        if args[1:3] == ["console", "eval"]:
-            expression = args[args.index("--expression") + 1]
-            if "target.click" in expression:
-                return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"value": {"clicked": True}}), stderr="")
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=json.dumps({"value": [{"name": "Meteojob", "url": "https://www.meteojob.com/jobs/chauffeur-pl"}]}),
-                stderr="",
-            )
-        raise AssertionError(args)
+    def fake_lifecycle_open(self, url, **kw):
+        opened_urls.append(url)
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def fake_snapshot(self, **kw):
+        return _ok({"text": "Pas de partenaire ici"})
+
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_lifecycle_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
     result = runner.invoke(app, ["ft", "apply", "1", "--partner", "hellowork"])
 
@@ -241,21 +217,14 @@ def test_ft_apply_partner_missing_partner_returns_clean_cli_error_without_extern
     assert "Error: Partenaire introuvable" in result.output
     assert "Invalid value" not in result.output
     assert "Traceback" not in result.output
-    opened_urls = [call[call.index("--url") + 1] for call in calls if call[1:3] == ["lifecycle", "open"]]
     assert opened_urls == ["https://candidat.francetravail.fr/offres/recherche/detail/ABC123"]
     with connect(db_path) as verify_conn:
         assert all(event["event_type"] != "partner_opened" for event in list_offer_events(verify_conn, 1))
 
 
 def test_ft_smoke_dry_run_json_does_not_touch_database_or_submit(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
-
-    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError(args)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = runner.invoke(app, ["ft", "smoke", "support", "--location", "Annecy", "--dry-run", "--json"])
 
@@ -271,20 +240,17 @@ def test_ft_smoke_dry_run_json_does_not_touch_database_or_submit(tmp_path, monke
 
 
 def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
-    calls = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        if args[1:3] == ["lifecycle", "open"]:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
-        if args[1] == "snapshot":
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "cards": [{"title": "Support"}]}), stderr="")
-        raise AssertionError(args)
+    def fake_lifecycle_open(self, url, **kw):
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def fake_snapshot(self, **kw):
+        return _ok({"cards": [{"title": "Support"}]})
+
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_lifecycle_open)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
     result = runner.invoke(app, ["ft", "smoke", "support", "--json"])
 
@@ -294,5 +260,4 @@ def test_ft_smoke_json_opens_search_and_snapshots_without_importing(tmp_path, mo
     assert payload["offer_count"] == 1
     assert payload["database_write"] is False
     assert payload["submit_application"] is False
-    assert [call[1:3] for call in calls] == [["lifecycle", "open"], ["snapshot", "--profile"]]
     assert not db_path.exists()

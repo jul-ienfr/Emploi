@@ -11,6 +11,7 @@ from rich.table import Table
 from emploi.applications import create_application_draft
 from emploi.auto_apply import run_auto_apply_for_enabled_profiles, run_auto_apply_for_saved_search
 from emploi.brief import build_brief
+from emploi.daemon import watch_loop
 from emploi.doctor import build_doctor_report
 
 from emploi import __version__, config as emploi_config
@@ -63,6 +64,7 @@ from emploi.france_travail.flows import (
     search_offers,
 )
 from emploi.hellowork import apply_hellowork
+from emploi.hellowork_search import run_hellowork_saved_search, search_hellowork
 from emploi.importers import import_offers_file
 from emploi.nextcloud_deck import create_offer_card
 from emploi.nextcloud_files import export_application_to_nextcloud
@@ -1140,6 +1142,48 @@ def hellowork_apply(
         console.print("Dry-run : aucune candidature envoyée. Ajoute --submit --yes pour envoyer.")
 
 
+@hellowork_app.command("search")
+def hellowork_search(
+    query: str = typer.Argument(..., help="Mots-clés de recherche"),
+    location: str = typer.Option("", "--location", "-l", help="Lieu"),
+    contract: str = typer.Option("", "--contract", "-c", help="Type de contrat (CDI, CDD, etc.)"),
+    site: str = typer.Option("hellowork", "--site"),
+    profile: str = typer.Option("emploi-hellowork", "--profile"),
+) -> None:
+    """Recherche des offres sur HelloWork directement."""
+    _ensure_option_enabled("managed_browser.enabled")
+    try:
+        browser = ManagedBrowserClient()
+        with connect() as conn:
+            init_db(conn)
+            results = search_hellowork(
+                conn,
+                query=query,
+                location=location,
+                contract=contract,
+                browser=browser,
+                site=site,
+                profile=profile,
+            )
+    except ManagedBrowserError as error:
+        _handle_browser_error(error)
+
+    console.print(f"{len(results)} offre(s) HelloWork trouvée(s)")
+    created = sum(1 for result in results if result.created)
+    updated = len(results) - created
+    console.print(f"créée(s): {created} — mise(s) à jour: {updated}")
+    table = Table("ID", "Action", "Score", "Titre", "URL")
+    for result in results:
+        table.add_row(
+            str(result.offer_id),
+            "créée" if result.created else "mise à jour",
+            str(result.score),
+            result.title,
+            result.browser_url,
+        )
+    console.print(table)
+
+
 @search_profile_app.command("add")
 def search_profile_add(
     name: str,
@@ -1148,8 +1192,11 @@ def search_profile_add(
     radius: int = typer.Option(0, "--radius"),
     contract: str = typer.Option("", "--contract"),
     disabled: bool = typer.Option(False, "--disabled"),
+    source: str = typer.Option("all", "--source", help="Source: all (tous les sites), france-travail, ou hellowork"),
 ) -> None:
-    """Ajoute un profil de recherche France Travail."""
+    """Ajoute un profil de recherche."""
+    if source not in ("all", "france-travail", "hellowork"):
+        raise typer.BadParameter("--source doit être 'all', 'france-travail' ou 'hellowork'")
     with connect() as conn:
         init_db(conn)
         search_id = add_saved_search(
@@ -1160,8 +1207,9 @@ def search_profile_add(
             radius=radius,
             contract=contract,
             enabled=not disabled,
+            source=source,
         )
-    console.print(f"Profil de recherche ajouté #{search_id} — {name}")
+    console.print(f"Profil de recherche ajouté #{search_id} — {name} (source: {source})")
 
 
 @search_profile_app.command("install-julien-defaults")
@@ -1235,6 +1283,7 @@ def search_profile_list(enabled_only: bool = typer.Option(False, "--enabled")) -
     table = Table(
         "ID",
         "Nom",
+        "Source",
         "Query",
         "Lieu",
         "Rayon",
@@ -1245,16 +1294,17 @@ def search_profile_list(enabled_only: bool = typer.Option(False, "--enabled")) -
         "Notes",
         width=180,
     )
-    console.print("Colonnes: Actif — Dernier run — Auto-apply — Notes")
+    console.print("Colonnes: Source — Actif — Dernier run — Auto-apply — Notes")
     for saved in searches:
         auto_apply = _format_auto_apply(saved)
         console.print(
-            f"Profil {saved['name']} | Actif: {'oui' if saved['enabled'] else 'non'} | "
+            f"Profil {saved['name']} | Source: {saved['source']} | Actif: {'oui' if saved['enabled'] else 'non'} | "
             f"Dernier run: {saved['last_run_at'] or 'jamais'} | Auto-apply: {auto_apply} | Notes: {saved['notes']}"
         )
         table.add_row(
             str(saved["id"]),
             saved["name"],
+            saved["source"],
             saved["query"],
             saved["where_text"],
             _format_search_radius(saved),
@@ -1294,6 +1344,23 @@ def search_profile_auto_apply(
     console.print(f"Auto-apply configuré #{saved['id']} — {saved['name']} : {_format_auto_apply(saved)}")
 
 
+# All available search engines — add new sources here
+SEARCH_ENGINES: list[str] = ["france-travail", "hellowork"]
+
+
+def _resolve_sources(source: str) -> list[str]:
+    """Resolve a profile source value to a list of engines to run.
+
+    'all' → every engine in SEARCH_ENGINES
+    'france-travail' / 'hellowork' → just that one
+    """
+    if source == "all":
+        return list(SEARCH_ENGINES)
+    if source in SEARCH_ENGINES:
+        return [source]
+    return []
+
+
 @search_profile_app.command("run")
 def search_profile_run(
     name_or_id: str | None = typer.Argument(None),
@@ -1301,8 +1368,7 @@ def search_profile_run(
     site: str = typer.Option(DEFAULT_SITE, "--site"),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
-    """Exécute un profil de recherche via France Travail."""
-    _ensure_option_enabled("france_travail.enabled")
+    """Exécute un profil de recherche sauvegardé."""
     _ensure_option_enabled("managed_browser.enabled")
     try:
         with connect() as conn:
@@ -1314,29 +1380,62 @@ def search_profile_run(
                 updated = 0
                 rows = []
                 for saved in profiles:
-                    results = run_saved_search(conn, int(saved["id"]), site=site, profile=profile)
-                    total += len(results)
-                    created += sum(1 for result in results if result.created)
-                    updated += sum(1 for result in results if not result.created)
+                    source = str(saved["source"]) if "source" in saved.keys() else "all"
+                    sources_to_run = _resolve_sources(source)
+                    profile_total = 0
+                    for src in sources_to_run:
+                        if src == "hellowork":
+                            results = run_hellowork_saved_search(conn, int(saved["id"]), site=site, profile=profile)
+                        else:
+                            _ensure_option_enabled("france_travail.enabled")
+                            results = run_saved_search(conn, int(saved["id"]), site=site, profile=profile)
+                        profile_total += len(results)
+                        total += len(results)
+                        created += sum(1 for result in results if result.created)
+                        updated += sum(1 for result in results if not result.created)
                     refreshed = conn.execute("SELECT * FROM saved_searches WHERE id = ?", (saved["id"],)).fetchone()
-                    rows.append((saved, len(results), refreshed["last_run_at"] if refreshed else ""))
+                    rows.append((saved, profile_total, refreshed["last_run_at"] if refreshed else ""))
                 console.print(
-                    f"{total} offre(s) France Travail traitée(s) via {len(profiles)} profil(s) actif(s) — "
+                    f"{total} offre(s) traitée(s) via {len(profiles)} profil(s) actif(s) — "
                     f"créée(s): {created} — mise(s) à jour: {updated}"
                 )
-                table = Table("Profil", "Actif", "Offres", "Dernier run")
+                table = Table("Profil", "Source", "Actif", "Offres", "Dernier run")
                 for saved, count, last_run in rows:
-                    table.add_row(saved["name"], "oui", str(count), last_run or "jamais")
+                    s = str(saved["source"]) if "source" in saved.keys() else "france-travail"
+                    table.add_row(saved["name"], s, "oui", str(count), last_run or "jamais")
                 console.print(table)
                 return
             if name_or_id is None:
                 raise typer.BadParameter("Indique un nom/ID ou --all")
-            results = run_saved_search(conn, name_or_id, site=site, profile=profile)
+            saved = get_saved_search(conn, name_or_id)
+            if saved is None:
+                raise typer.BadParameter(f"Profil de recherche introuvable: {name_or_id}")
+            source = str(saved["source"]) if "source" in saved.keys() else "all"
+            sources_to_run = _resolve_sources(source)
+            if not sources_to_run:
+                raise typer.BadParameter(f"Source inconnue: {source}")
+            if len(sources_to_run) > 1:
+                if not typer.confirm(f"Lancer '{saved['name']}' sur {', '.join(sources_to_run)} ?"):
+                    console.print("Annulé.")
+                    return
+            elif sources_to_run[0] == "hellowork":
+                if not typer.confirm(f"Lancer le profil HelloWork '{saved['name']}' ?"):
+                    console.print("Annulé.")
+                    return
+            all_results = []
+            for src in sources_to_run:
+                if src == "hellowork":
+                    results = run_hellowork_saved_search(conn, name_or_id, site=site, profile=profile)
+                else:
+                    _ensure_option_enabled("france_travail.enabled")
+                    results = run_saved_search(conn, name_or_id, site=site, profile=profile)
+                all_results.extend(results)
+                console.print(f"{len(results)} offre(s) {src} traitée(s)")
+            results = all_results
     except ManagedBrowserError as error:
         _handle_browser_error(error)
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
-    console.print(f"{len(results)} offre(s) France Travail traitée(s)")
     created = sum(1 for result in results if result.created)
     updated = len(results) - created
     console.print(f"créée(s): {created} — mise(s) à jour: {updated}")
@@ -1344,6 +1443,20 @@ def search_profile_run(
     for result in results:
         table.add_row(str(result.offer_id), "créée" if result.created else "mise à jour", str(result.score), result.title, result.browser_url)
     console.print(table)
+
+
+@search_profile_app.command("watch")
+def search_profile_watch(
+    interval: int = typer.Option(30, "--interval", "-i", help="Intervalle en minutes entre chaque cycle"),
+    once: bool = typer.Option(False, "--once", help="Exécute un seul cycle puis s'arrête"),
+    site: str = typer.Option(DEFAULT_SITE, "--site"),
+    profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+) -> None:
+    """Exécute les profils actifs en boucle, toutes les N minutes.
+
+    Utilisez --once pour un seul cycle (utile pour vérifier le fonctionnement).
+    """
+    watch_loop(interval_minutes=interval, once=once, site=site, profile=profile)
 
 
 @auto_apply_app.command("run")

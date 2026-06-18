@@ -3,33 +3,45 @@ from __future__ import annotations
 import json
 import math
 import os
-import shlex
-import subprocess
-from collections.abc import Callable, Sequence
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from emploi.browser.errors import ManagedBrowserCommandError, ManagedBrowserUnavailableError
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
 
-Runner = Callable[..., subprocess.CompletedProcess[str]]
-
 
 class ManagedBrowserClient:
-    """Thin JSON command adapter for an external Managed Browser CLI."""
+    """HTTP adapter for the Python Managed Browser server (port 9377).
+
+    Uses ``EMPLOI_MANAGED_BROWSER_URL`` (default ``http://127.0.0.1:9377``).
+    """
 
     def __init__(
         self,
-        command: str | None = None,
-        runner: Runner | None = None,
+        base_url: str | None = None,
         timeout: float | int | None = None,
     ) -> None:
-        self.command = command or os.environ.get("EMPLOI_MANAGED_BROWSER_COMMAND", "managed-browser")
-        self.command_parts = shlex.split(self.command)
-        self.runner = runner or subprocess.run
+        self.base_url = (
+            base_url
+            or os.environ.get("EMPLOI_MANAGED_BROWSER_URL", "http://127.0.0.1:9377")
+        ).rstrip("/")
         self.timeout = self._parse_timeout(timeout)
 
-    def status(self, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult:
-        return self._run("status", site=site, profile=profile)
+    # ------------------------------------------------------------------
+    # Public API — same signatures as before
+    # ------------------------------------------------------------------
+
+    def status(
+        self, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE
+    ) -> BrowserCommandResult:
+        return self._get(
+            f"/managed/profiles/{profile}/status",
+            params={"site": site},
+            action="status",
+            site=site,
+            profile=profile,
+        )
 
     def open(
         self,
@@ -38,7 +50,13 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("open", site=site, profile=profile, options=["--url", url])
+        return self._post_json(
+            "/managed/cli/open",
+            body={"profile": profile, "site": site, "url": url},
+            action="open",
+            site=site,
+            profile=profile,
+        )
 
     def lifecycle_open(
         self,
@@ -47,7 +65,13 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("lifecycle_open", site=site, profile=profile, options=["--url", url])
+        return self._post_json(
+            "/managed/cli/open",
+            body={"profile": profile, "site": site, "url": url, "warmup": True},
+            action="lifecycle_open",
+            site=site,
+            profile=profile,
+        )
 
     def console_eval(
         self,
@@ -56,7 +80,18 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("console_eval", site=site, profile=profile, options=["--expression", expression])
+        return self._post_json(
+            "/managed/cli/act",
+            body={
+                "profile": profile,
+                "site": site,
+                "action": "evaluate",
+                "params": {"expression": expression},
+            },
+            action="console_eval",
+            site=site,
+            profile=profile,
+        )
 
     def snapshot(
         self,
@@ -65,8 +100,16 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        options = ["--label", label] if label else []
-        return self._run("snapshot", site=site, profile=profile, options=options)
+        body: dict[str, Any] = {"profile": profile, "site": site}
+        if label:
+            body["label"] = label
+        return self._post_json(
+            "/managed/cli/snapshot",
+            body=body,
+            action="snapshot",
+            site=site,
+            profile=profile,
+        )
 
     def checkpoint(
         self,
@@ -75,12 +118,26 @@ class ManagedBrowserClient:
         site: str = DEFAULT_SITE,
         profile: str = DEFAULT_PROFILE,
     ) -> BrowserCommandResult:
-        return self._run("checkpoint", site=site, profile=profile, options=["--reason", name])
+        return self._post_json(
+            "/managed/cli/checkpoint",
+            body={"profile": profile, "site": site, "reason": name},
+            action="checkpoint",
+            site=site,
+            profile=profile,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _parse_timeout(self, timeout: float | int | None) -> float:
-        raw_timeout: object = timeout if timeout is not None else os.environ.get("EMPLOI_MANAGED_BROWSER_TIMEOUT", "60")
+        raw: object = (
+            timeout
+            if timeout is not None
+            else os.environ.get("EMPLOI_MANAGED_BROWSER_TIMEOUT", "60")
+        )
         try:
-            parsed = float(raw_timeout)
+            parsed = float(raw)
         except (TypeError, ValueError) as exc:
             raise ManagedBrowserCommandError(
                 "Invalid EMPLOI_MANAGED_BROWSER_TIMEOUT: expected a number of seconds"
@@ -91,97 +148,89 @@ class ManagedBrowserClient:
             )
         return parsed
 
-    def _run(
+    def _get(
         self,
-        subcommand: str,
+        path: str,
         *,
+        params: dict[str, str] | None = None,
+        action: str,
         site: str,
         profile: str,
-        options: Sequence[str] = (),
     ) -> BrowserCommandResult:
-        args = [
-            *self.command_parts,
-            *self._managed_browser_subcommand(subcommand),
-            "--profile",
-            profile,
-            "--site",
-            site,
-            *options,
-            "--json",
-        ]
-        try:
-            completed = self.runner(args, capture_output=True, text=True, check=False, timeout=self.timeout)
-        except FileNotFoundError as exc:
-            command = self.command_parts[0] if self.command_parts else self.command
-            raise ManagedBrowserUnavailableError(
-                f"Managed Browser command not found: {command}. "
-                "Set EMPLOI_MANAGED_BROWSER_COMMAND or install the command."
-            ) from exc
-        except PermissionError as exc:
-            command = self.command_parts[0] if self.command_parts else self.command
-            raise ManagedBrowserUnavailableError(
-                f"Managed Browser command not executable: {command}. "
-                "Check file permissions."
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            context = self._error_context(subcommand, site, profile, None, exc.stdout, exc.stderr)
-            raise ManagedBrowserCommandError(
-                f"Managed Browser command timed out after {self.timeout:g}s; {context}"
-            ) from exc
+        url = self.base_url + path
+        if params:
+            qs = "&".join(f"{k}={v}" for k, v in params.items() if v)
+            if qs:
+                url += "?" + qs
+        payload = self._fetch_json(url, method="GET", action=action, site=site, profile=profile)
+        return BrowserCommandResult(command=action, site=site, profile=profile, payload=payload)
 
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
-        if completed.returncode != 0:
-            context = self._error_context(subcommand, site, profile, completed.returncode, stdout, stderr)
-            raise ManagedBrowserCommandError(
-                f"Managed Browser command failed; {context}", returncode=completed.returncode
-            )
-
-        try:
-            payload: Any = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            context = self._error_context(subcommand, site, profile, completed.returncode, stdout, stderr)
-            raise ManagedBrowserCommandError(f"Invalid JSON from Managed Browser command: {exc}; {context}") from exc
-        if not isinstance(payload, dict):
-            context = self._error_context(subcommand, site, profile, completed.returncode, stdout, stderr)
-            raise ManagedBrowserCommandError(
-                f"Invalid JSON from Managed Browser command: expected object; {context}"
-            )
-        return BrowserCommandResult(command=subcommand, site=site, profile=profile, payload=payload)
-
-    def _error_context(
+    def _post_json(
         self,
-        subcommand: str,
+        path: str,
+        *,
+        body: dict[str, Any],
+        action: str,
         site: str,
         profile: str,
-        returncode: int | None,
-        stdout: str | bytes | None,
-        stderr: str | bytes | None,
-    ) -> str:
-        parts = [f"subcommand={subcommand}", f"site={site}", f"profile={profile}", f"returncode={returncode}"]
-        if stdout:
-            parts.append(f"stdout={self._bounded_output(stdout)}")
-        if stderr:
-            parts.append(f"stderr={self._bounded_output(stderr)}")
-        return "; ".join(parts)
+    ) -> BrowserCommandResult:
+        url = self.base_url + path
+        payload = self._fetch_json(
+            url, method="POST", body=body, action=action, site=site, profile=profile
+        )
+        return BrowserCommandResult(command=action, site=site, profile=profile, payload=payload)
 
-    def _bounded_output(self, value: str | bytes, limit: int = 500) -> str:
-        if isinstance(value, bytes):
-            value = value.decode(errors="replace")
-        value = value.strip()
-        if len(value) > limit:
-            value = f"{value[:limit]}..."
-        return repr(value)
+    def _fetch_json(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        body: dict[str, Any] | None = None,
+        action: str,
+        site: str,
+        profile: str,
+    ) -> dict[str, Any]:
+        data_bytes = json.dumps(body).encode() if body else None
+        req = Request(
+            url,
+            data=data_bytes,
+            method=method,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read().decode()
+        except HTTPError as exc:
+            error_body = ""
+            try:
+                error_body = exc.read().decode()[:500]
+            except Exception:
+                pass
+            raise ManagedBrowserCommandError(
+                f"Managed Browser HTTP {exc.code}; "
+                f"subcommand={action}; site={site}; profile={profile}; "
+                f"body={error_body!r}"
+            ) from exc
+        except URLError as exc:
+            raise ManagedBrowserUnavailableError(
+                f"Managed Browser unreachable at {self.base_url}: {exc.reason}. "
+                f"Check that the server is running (port {self.base_url.rsplit(':', 1)[-1]})."
+            ) from exc
 
-    def _managed_browser_subcommand(self, subcommand: str) -> list[str]:
-        if subcommand == "status":
-            return ["profile", "status"]
-        if subcommand == "open":
-            return ["navigate"]
-        if subcommand == "lifecycle_open":
-            return ["lifecycle", "open"]
-        if subcommand == "console_eval":
-            return ["console", "eval"]
-        if subcommand == "checkpoint":
-            return ["storage", "checkpoint"]
-        return [subcommand]
+        try:
+            payload: Any = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ManagedBrowserCommandError(
+                f"Invalid JSON from Managed Browser: {exc}; "
+                f"subcommand={action}; site={site}; profile={profile}; "
+                f"raw={raw[:300]!r}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ManagedBrowserCommandError(
+                f"Invalid JSON from Managed Browser: expected object; "
+                f"subcommand={action}; site={site}; profile={profile}"
+            )
+        return payload

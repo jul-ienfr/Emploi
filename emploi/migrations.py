@@ -132,6 +132,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "saved_searches", "auto_apply_period", "TEXT NOT NULL DEFAULT 'weekly'")
         _add_column_if_missing(conn, "saved_searches", "auto_apply_strategy", "TEXT NOT NULL DEFAULT 'best-score'")
         _add_column_if_missing(conn, "saved_searches", "auto_apply_min_score", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "saved_searches", "source", "TEXT NOT NULL DEFAULT 'all'")
         _add_column_if_missing(conn, "applications", "draft_path", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "offers", "score", "INTEGER NOT NULL DEFAULT 50")
         _add_column_if_missing(conn, "offers", "status", "TEXT NOT NULL DEFAULT 'new'")

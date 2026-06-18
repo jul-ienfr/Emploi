@@ -114,7 +114,7 @@ def _application_offer_to_dict(row) -> dict[str, Any]:
 
 def _build_blockers(conn) -> list[str]:
     blockers: list[str] = []
-    doctor = build_doctor_report(probe_browser=False)
+    doctor = build_doctor_report(probe_browser=True)
     browser = doctor.get("managed_browser", {})
     if browser.get("status") not in {"ok", "available"}:
         remediation = browser.get("remediation") or "Configurer EMPLOI_MANAGED_BROWSER_COMMAND."

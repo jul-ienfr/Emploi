@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from typing import Any
 
 from emploi import __version__, config as _config
@@ -90,28 +89,15 @@ def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
             "command": None,
             "path": None,
             "error": str(exc),
-            "remediation": "Définir EMPLOI_MANAGED_BROWSER_TIMEOUT avec un nombre de secondes positif, par exemple 60.",
-        }
-    executable_name = client.command_parts[0] if client.command_parts else client.command
-    executable = shutil.which(executable_name)
-    if executable is None:
-        return {
-            "status": "missing",
-            "available": False,
-            "probe": "not_run",
-            "can_run_smoke": False,
-            "command": client.command,
-            "path": None,
-            "error": f"Command not found: {executable_name}",
-            "remediation": "Installer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND vers l'exécutable correct, puis lancer `emploi browser smoke --json`.",
+            "remediation": "Vérifier la configuration du Managed Browser.",
         }
     result: dict[str, Any] = {
         "status": "available",
         "available": True,
         "probe": "skipped",
         "can_run_smoke": True,
-        "command": client.command,
-        "path": executable,
+        "command": client.base_url,
+        "path": client.base_url,
         "remediation": "Lancer `emploi browser smoke --json` pour vérifier le profil avant un flux réel.",
     }
     if not probe:
@@ -124,10 +110,10 @@ def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
             "available": False,
             "probe": "failed",
             "can_run_smoke": False,
-            "command": client.command,
-            "path": executable,
+            "command": client.base_url,
+            "path": client.base_url,
             "error": str(exc),
-            "remediation": "Vérifier EMPLOI_MANAGED_BROWSER_COMMAND et relancer `emploi browser smoke --json`.",
+            "remediation": "Vérifier que le serveur Managed Browser est lancé sur " + client.base_url,
         }
     except ManagedBrowserError as exc:
         return {
@@ -135,8 +121,8 @@ def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
             "available": True,
             "probe": "failed",
             "can_run_smoke": False,
-            "command": client.command,
-            "path": executable,
+            "command": client.base_url,
+            "path": client.base_url,
             "error": str(exc),
             "remediation": "Relancer `emploi browser smoke --json`, déverrouiller/connecter le profil Managed Browser emploi/france-travail si nécessaire.",
         }
@@ -145,8 +131,8 @@ def _check_managed_browser(*, probe: bool) -> dict[str, Any]:
         "available": True,
         "probe": "ok",
         "can_run_smoke": True,
-        "command": client.command,
-        "path": executable,
+        "command": client.base_url,
+        "path": client.base_url,
         "payload": status.payload,
         "remediation": "",
     }

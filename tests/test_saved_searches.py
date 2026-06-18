@@ -158,36 +158,15 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
-    calls = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        if args[1:3] == ["lifecycle", "open"]:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "url": args[args.index("--url") + 1]}), stderr="")
-        if args[1] == "snapshot":
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                stdout=json.dumps(
-                    {
-                        "cards": [
-                            {
-                                "title": "Technicien support",
-                                "company": "Acme",
-                                "location": "Annecy",
-                                "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
-                                "description": "Support informatique CDI",
-                                "contract_type": "CDI",
-                            }
-                        ],
-                        "text": "Technicien support Acme Annecy",
-                    }
-                ),
-                stderr="",
-            )
-        raise AssertionError(args)
+    from emploi.france_travail.flows import SearchImportResult
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def fake_run_saved_search(conn, search_id_or_name, *, site="france-travail", profile="emploi"):
+        return [
+            SearchImportResult(1, True, "Technicien support", 80, "https://candidat.francetravail.fr/offres/recherche/detail/ABC123"),
+        ]
+
+    monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
 
     added = runner.invoke(
         app,
@@ -206,7 +185,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
         ],
     )
     listed = runner.invoke(app, ["search-profile", "list"])
-    ran = runner.invoke(app, ["search-profile", "run", "support"])
+    ran = runner.invoke(app, ["search-profile", "run", "support"], input="y\n")
 
     assert added.exit_code == 0
     assert "Profil de recherche ajouté" in added.stdout
@@ -215,8 +194,8 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
     assert "Annecy" in listed.stdout
     assert "20 (demandé 15)" in listed.stdout
     assert ran.exit_code == 0
-    assert "1 offre" in ran.stdout
-    assert any(call[1:3] == ["lifecycle", "open"] for call in calls)
+    assert "Technicien support" in ran.stdout
+    assert "créée(s): 1" in ran.stdout
 
 
 def test_search_profile_cli_enable_disable_toggle_existing_profile(tmp_path, monkeypatch):
@@ -337,6 +316,11 @@ def test_search_profile_run_all_reports_created_updated_enabled_and_last_run(tmp
         ]
 
     monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
+
+    def fake_run_hellowork_saved_search(conn, search_id_or_name, *, site="france-travail", profile="emploi"):
+        return []
+
+    monkeypatch.setattr("emploi.cli.run_hellowork_saved_search", fake_run_hellowork_saved_search)
 
     ran = runner.invoke(app, ["search-profile", "run", "--all"])
     listed = runner.invoke(app, ["search-profile", "list"])

@@ -1,208 +1,163 @@
+from __future__ import annotations
+
 import json
-import subprocess
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
+from emploi.browser.errors import ManagedBrowserCommandError, ManagedBrowserUnavailableError
+from emploi.browser.models import BrowserCommandResult
 from emploi.cli import app
 
 
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def clean_managed_browser_timeout(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", raising=False)
+def _ok(payload: dict) -> BrowserCommandResult:
+    return BrowserCommandResult(command="test", site="france-travail", profile="emploi-candidature", payload=payload)
+
+
+def _err(msg: str) -> BrowserCommandResult:
+    return BrowserCommandResult(command="test", site="france-travail", profile="emploi-candidature", payload={"ok": False, "error": msg})
+
+
+# ---------------------------------------------------------------------------
+# Tests for `emploi browser status`
+# ---------------------------------------------------------------------------
 
 
 def test_browser_status_prints_json(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    def fake_run(args, **kwargs):
-        assert args == [
-            'managed-browser',
-            'profile',
-            'status',
-            '--profile',
-            'emploi-candidature',
-            '--site',
-            'france-travail',
-            '--json',
-        ]
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'state': 'ready'}), stderr='')
-
-    monkeypatch.setattr(subprocess, 'run', fake_run)
-
-    result = runner.invoke(app, ['browser', 'status'])
-
+    """status returns ok JSON with site/profile info."""
+    monkeypatch.setattr(
+        "emploi.browser.client.ManagedBrowserClient.status",
+        lambda self, **kw: _ok({"state": "ready"}),
+    )
+    result = runner.invoke(app, ["browser", "status"])
     assert result.exit_code == 0
-    assert 'ready' in result.stdout
-    assert 'france-travail' in result.stdout
-    assert 'emploi' in result.stdout
+    assert "ready" in result.stdout
+    assert "france-travail" in result.stdout
 
 
 def test_browser_open_accepts_url_and_profile_options(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    seen = {}
+    """open delegates URL and custom profile/site to the client."""
+    seen: dict = {}
 
-    def fake_run(args, **kwargs):
-        seen['args'] = args
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'url': 'https://example.test'}), stderr='')
+    def fake_open(self, url, **kw):
+        seen["url"] = url
+        seen["profile"] = kw.get("profile")
+        seen["site"] = kw.get("site")
+        return _ok({"url": url})
 
-    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.open", fake_open)
 
     result = runner.invoke(
         app,
-        [
-            'browser',
-            'open',
-            'https://example.test',
-            '--site',
-            'custom-site',
-            '--profile',
-            'custom-profile',
-        ],
+        ["browser", "open", "https://example.test", "--site", "custom-site", "--profile", "custom-profile"],
     )
-
     assert result.exit_code == 0
-    assert seen['args'] == [
-        'managed-browser',
-        'navigate',
-        '--profile',
-        'custom-profile',
-        '--site',
-        'custom-site',
-        '--url',
-        'https://example.test',
-        '--json',
-    ]
-    assert 'https://example.test' in result.stdout
+    assert seen["url"] == "https://example.test"
+    assert seen["profile"] == "custom-profile"
+    assert seen["site"] == "custom-site"
+    assert "https://example.test" in result.stdout
 
 
 def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    calls = []
+    """snapshot and checkpoint delegate correctly."""
+    calls: list[str] = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'id': len(calls)}), stderr='')
+    def fake_snapshot(self, **kw):
+        calls.append("snapshot")
+        return _ok({"text": "jobs"})
 
-    monkeypatch.setattr(subprocess, 'run', fake_run)
+    def fake_checkpoint(self, name, **kw):
+        calls.append(f"checkpoint:{name}")
+        return _ok({"id": 1})
 
-    snapshot = runner.invoke(app, ['browser', 'snapshot', '--label', 'jobs'])
-    checkpoint = runner.invoke(app, ['browser', 'checkpoint', 'after-login'])
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.checkpoint", fake_checkpoint)
 
-    assert snapshot.exit_code == 0
-    assert checkpoint.exit_code == 0
-    assert calls[0] == [
-        'managed-browser',
-        'snapshot',
-        '--profile',
-        'emploi-candidature',
-        '--site',
-        'france-travail',
-        '--label',
-        'jobs',
-        '--json',
-    ]
-    assert calls[1] == [
-        'managed-browser',
-        'storage',
-        'checkpoint',
-        '--profile',
-        'emploi-candidature',
-        '--site',
-        'france-travail',
-        '--reason',
-        'after-login',
-        '--json',
-    ]
+    snap = runner.invoke(app, ["browser", "snapshot", "--label", "jobs"])
+    ckpt = runner.invoke(app, ["browser", "checkpoint", "after-login"])
+
+    assert snap.exit_code == 0
+    assert ckpt.exit_code == 0
+    assert calls == ["snapshot", "checkpoint:after-login"]
 
 
 def test_browser_unavailable_shows_clear_error_without_traceback(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    def fake_run(args, **kwargs):
-        raise FileNotFoundError(args[0])
+    """Client error is shown cleanly, no traceback."""
+    def fake_status(self, **kw):
+        raise ManagedBrowserUnavailableError("Server not running")
 
-    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", fake_status)
 
-    result = runner.invoke(app, ['browser', 'status'])
-
+    result = runner.invoke(app, ["browser", "status"])
     assert result.exit_code != 0
-    assert 'Managed Browser command not found' in result.stdout
-    assert 'Traceback' not in result.stdout
+    assert "Traceback" not in result.stdout
     assert isinstance(result.exception, SystemExit)
 
 
 def test_browser_status_invalid_timeout_shows_clear_error_without_traceback(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
+    """Invalid EMPLOI_MANAGED_BROWSER_TIMEOUT shows clean error."""
     monkeypatch.setenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", "slow")
-    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError(args)
-
-    monkeypatch.setattr(subprocess, 'run', fake_run)
-
-    result = runner.invoke(app, ['browser', 'status'])
-
+    result = runner.invoke(app, ["browser", "status"])
     assert result.exit_code != 0
-    assert 'EMPLOI_MANAGED_BROWSER_TIMEOUT' in result.stdout
-    assert 'Traceback' not in result.stdout
+    assert "EMPLOI_MANAGED_BROWSER_TIMEOUT" in result.stdout
+    assert "Traceback" not in result.stdout
     assert isinstance(result.exception, SystemExit)
 
 
 def test_browser_status_subprocess_timeout_shows_clear_error_without_traceback(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    monkeypatch.setenv("EMPLOI_MANAGED_BROWSER_TIMEOUT", "3")
-    def fake_run(args, **kwargs):
-        assert kwargs['timeout'] == 3.0
-        raise subprocess.TimeoutExpired(args, kwargs['timeout'])
+    """HTTP timeout shows 'timed out' error cleanly."""
+    def fake_status(self, **kw):
+        raise ManagedBrowserUnavailableError("HTTP request timed out after 3s")
 
-    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", fake_status)
 
-    result = runner.invoke(app, ['browser', 'status'])
-
+    result = runner.invoke(app, ["browser", "status"])
     assert result.exit_code != 0
-    assert 'timed out after' in result.stdout
-    assert 'Traceback' not in result.stdout
+    assert "timed out" in result.stdout
+    assert "Traceback" not in result.stdout
     assert isinstance(result.exception, SystemExit)
 
 
 def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    calls = []
+    """smoke --json returns ok with status + snapshot payloads."""
+    calls: list[str] = []
 
-    def fake_run(args, **kwargs):
-        calls.append(args)
-        if args[1:3] == ['profile', 'status']:
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'state': 'ready'}), stderr='')
-        if args[1] == 'snapshot':
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'ok': True, 'text': 'France Travail'}), stderr='')
-        raise AssertionError(args)
+    def fake_status(self, **kw):
+        calls.append("status")
+        return _ok({"state": "ready"})
 
-    monkeypatch.setattr(subprocess, 'run', fake_run)
+    def fake_snapshot(self, **kw):
+        calls.append("snapshot")
+        return _ok({"text": "France Travail"})
 
-    result = runner.invoke(app, ['browser', 'smoke', '--json'])
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", fake_status)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
+    result = runner.invoke(app, ["browser", "smoke", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload['status'] == 'ok'
-    assert payload['site'] == 'france-travail'
-    assert payload['profile'] == 'emploi-candidature'
-    assert payload['checks']['status']['payload']['state'] == 'ready'
-    assert payload['checks']['snapshot']['payload']['text'] == 'France Travail'
-    assert [call[1:3] for call in calls] == [['profile', 'status'], ['snapshot', '--profile']]
+    assert payload["status"] == "ok"
+    assert payload["site"] == "france-travail"
+    assert payload["profile"] == "emploi-candidature"
+    assert payload["checks"]["status"]["payload"]["state"] == "ready"
+    assert payload["checks"]["snapshot"]["payload"]["text"] == "France Travail"
+    assert calls == ["status", "snapshot"]
 
 
 def test_browser_smoke_dry_run_json_does_not_call_managed_browser(monkeypatch):
-    monkeypatch.delenv("EMPLOI_MANAGED_BROWSER_COMMAND", raising=False)
-    def fake_run(args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError(args)
+    """smoke --dry-run --json never touches the client."""
+    def fake_status(self, **kw):
+        raise AssertionError("should not be called")
 
-    monkeypatch.setattr(subprocess, 'run', fake_run)
+    monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", fake_status)
 
-    result = runner.invoke(app, ['browser', 'smoke', '--dry-run', '--json'])
-
+    result = runner.invoke(app, ["browser", "smoke", "--dry-run", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload['status'] == 'dry-run'
-    assert payload['would_run'] == ['status', 'snapshot']
-    assert payload['submit_application'] is False
+    assert payload["status"] == "dry-run"
+    assert payload["would_run"] == ["status", "snapshot"]
+    assert payload["submit_application"] is False

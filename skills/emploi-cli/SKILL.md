@@ -207,14 +207,14 @@ Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, 
 
 ```bash
 export EMPLOI_DB=/chemin/vers/emploi.sqlite
-export EMPLOI_MANAGED_BROWSER_COMMAND="node /home/jul/tools/camofox-browser/scripts/managed-browser.js"
+EMPLOI_MANAGED_BROWSER_URL=http://127.0.0.1:9377
 ```
 
-`emploi` parle le protocole du wrapper Camofox Managed Browser : `profile status`, `flow run open_url`, `snapshot`, `storage checkpoint`. `EMPLOI_MANAGED_BROWSER_COMMAND` peut donc contenir une commande avec arguments, pas seulement un binaire unique.
+`emploi` parle le protocole du wrapper Camofox Managed Browser : `profile status`, `flow run open_url`, `snapshot`, `storage checkpoint`. Le serveur HTTP Managed Browser tourne sur `EMPLOI_MANAGED_BROWSER_URL` (défaut `http://127.0.0.1:9377`). Le client utilise des appels HTTP au lieu de subprocess.
 
 ## Pièges connus
 
 - Si `emploi --version` échoue avec “Missing command”, vérifier que le callback Typer utilise `invoke_without_command=True`.
 - Une installation editable peut créer `emploi.egg-info/`; ne pas le committer sauf décision explicite.
-- Si Managed Browser est absent, ne pas remplacer par du scraping France Travail improvisé : signaler l'état dégradé et configurer `EMPLOI_MANAGED_BROWSER_COMMAND`.
+- Si Managed Browser est absent, ne pas remplacer par du scraping France Travail improvisé : signaler l'état dégradé et vérifier que le serveur tourne sur `:9377` (`curl http://127.0.0.1:9377/health`).
 - Ne pas utiliser une base de production pour les tests : définir `EMPLOI_DB` vers un fichier temporaire.
