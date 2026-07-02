@@ -320,6 +320,7 @@ def init() -> None:
 import emploi.cli.application  # noqa: E402, F401
 import emploi.cli.auto_apply  # noqa: E402, F401
 import emploi.cli.browser  # noqa: E402, F401
+import emploi.cli.dashboard  # noqa: E402, F401
 import emploi.cli.doctor  # noqa: E402, F401
 import emploi.cli.document_profile  # noqa: E402, F401
 import emploi.cli.ft  # noqa: E402, F401

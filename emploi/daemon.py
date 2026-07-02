@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from sqlite3 import Connection
 
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
-from emploi.db import connect, init_db, list_saved_searches
+from emploi.db import add_offer, connect, init_db, list_saved_searches
 from emploi.france_travail.flows import run_saved_search
 from emploi.logging import get_logger
 from emploi.monitoring import report_cycle_result, send_alert
@@ -60,9 +60,70 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> tuple[int, i
         _print(f"  {saved['name']}: {len(results)} offre(s) traitée(s)")
         logger.info("Profil %s: %d offre(s)", saved["name"], len(results))
 
+    # Also search Swiss sources using saved search queries
+    try:
+        ch_created, ch_errors = _run_swiss_sources(conn, profiles)
+        created += ch_created
+        total += ch_created
+        errors.extend(ch_errors)
+    except Exception as exc:
+        _print(f"ERREUR sources suisses: {exc}")
+        logger.error("Erreur sources suisses: %s", exc, exc_info=True)
+        errors.append(f"sources suisses: {exc}")
+
     _print(f"Total: {total} offre(s) — créée(s): {created} — mise(s) à jour: {updated}")
     logger.info("Cycle terminé: total=%d created=%d updated=%d errors=%d", total, created, updated, len(errors))
     return total, created, updated, errors
+
+
+def _run_swiss_sources(conn: Connection, profiles) -> tuple[int, list[str]]:
+    """Search Swiss job sources using saved search queries and store results."""
+    from emploi.sources.aggregator import search_all
+
+    errors: list[str] = []
+    total_created = 0
+
+    for saved in profiles:
+        query = str(saved.get("query", "") or "")
+        location = str(saved.get("where_text", "") or "")
+        if not query:
+            continue
+
+        try:
+            offers = search_all(query, location=location, countries=["CH"], max_per_source=10)
+        except Exception as exc:
+            errors.append(f"sources CH/{saved['name']}: {exc}")
+            continue
+
+        for offer in offers:
+            # Check if already exists
+            rows = conn.execute(
+                "SELECT id FROM offers WHERE url = ? OR (title = ? AND company = ? AND location = ?)",
+                (offer.url, offer.title, offer.company, offer.location),
+            ).fetchone()
+            if rows:
+                continue
+
+            try:
+                add_offer(
+                    conn,
+                    title=offer.title,
+                    company=offer.company,
+                    location=offer.location,
+                    url=offer.url,
+                    description=offer.description,
+                    source=f"daemon-{offer.source}",
+                    external_source=offer.source,
+                    contract_type=offer.contract_type,
+                    salary=offer.salary,
+                )
+                total_created += 1
+            except Exception as exc:
+                logger.debug("Failed to add offer %s: %s", offer.title, exc)
+
+    if total_created:
+        _print(f"  Sources CH: {total_created} nouvelle(s) offre(s)")
+    return total_created, errors
 
 
 def watch_loop(
