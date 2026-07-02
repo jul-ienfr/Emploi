@@ -14,7 +14,6 @@ from emploi.db import (
 )
 from emploi.migrations import migrate
 
-
 EXPECTED_OFFER_COLUMNS = {
     "external_source",
     "external_id",

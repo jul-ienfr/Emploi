@@ -1,13 +1,32 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Iterable
 
+from emploi.logging import get_logger
 from emploi.migrations import migrate
 from emploi.scoring import score_offer
+
+logger = get_logger("db")
+
+
+@contextlib.contextmanager
+def transactional(conn: sqlite3.Connection):
+    """Context manager that groups operations into a single transaction.
+
+    On success, commits.  On exception, rolls back via SAVEPOINT.
+    Useful for compound operations that must be atomic (e.g. import + event).
+    """
+    conn.execute("SAVEPOINT emploi_tx")
+    try:
+        yield conn
+        conn.execute("RELEASE SAVEPOINT emploi_tx")
+    except BaseException:
+        conn.execute("ROLLBACK TO SAVEPOINT emploi_tx")
+        raise
 
 
 DEFAULT_DB_PATH = Path.home() / ".local" / "share" / "emploi" / "emploi.sqlite"
@@ -49,6 +68,7 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    logger.debug("init_db called")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS offers (
@@ -344,7 +364,8 @@ def rescore_offer(conn: sqlite3.Connection, offer_id: int) -> sqlite3.Row:
     )
     conn.commit()
     updated = get_offer(conn, offer_id)
-    assert updated is not None
+    if updated is None:
+        raise RuntimeError(f"Offre disparue après rescore: {offer_id}")
     return updated
 
 
@@ -390,7 +411,8 @@ def update_application_status(conn: sqlite3.Connection, application_id: int, sta
     update_offer_status(conn, int(application["offer_id"]), normalized)
     conn.commit()
     updated = get_application(conn, application_id)
-    assert updated is not None
+    if updated is None:
+        raise RuntimeError(f"Candidature disparue après update: {application_id}")
     return updated
 
 
@@ -406,7 +428,8 @@ def schedule_application_followup(conn: sqlite3.Connection, application_id: int,
     )
     conn.commit()
     updated = get_application(conn, application_id)
-    assert updated is not None
+    if updated is None:
+        raise RuntimeError(f"Candidature disparue après schedule_followup: {application_id}")
     return updated
 
 
@@ -644,7 +667,8 @@ def set_saved_search_enabled(
     )
     conn.commit()
     updated = get_saved_search(conn, int(saved["id"]))
-    assert updated is not None
+    if updated is None:
+        raise RuntimeError(f"Profil de recherche disparu après update: {saved['id']}")
     return updated
 
 
@@ -692,7 +716,8 @@ def configure_saved_search_auto_apply(
     )
     conn.commit()
     updated = get_saved_search(conn, int(saved["id"]))
-    assert updated is not None
+    if updated is None:
+        raise RuntimeError(f"Profil de recherche disparu après auto_apply config: {saved['id']}")
     return updated
 
 

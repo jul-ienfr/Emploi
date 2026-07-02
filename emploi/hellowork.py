@@ -11,7 +11,6 @@ from emploi.applications import DEFAULT_DRAFTS_DIR
 from emploi.db import add_application, add_offer_event, get_offer, list_offer_events, update_offer_status
 from emploi.nextcloud_deck import DeckCardResult, create_offer_card
 
-
 HELLOWORK_INITIAL_FORM_PATH = "/fr-fr/offres/getinitialformframeview"
 HELLOWORK_FINAL_POST_PATH = "/fr-fr/offres/postcandidateinformationfromstepframeview"
 HELLOWORK_DISSUASION_POST_PATH = "/fr-fr/offres/postcertificationdissuasionformstepframeview"

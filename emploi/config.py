@@ -6,11 +6,11 @@ This module is the single source of truth for personal configuration
 
 from __future__ import annotations
 
-import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
+
+from emploi.config_registry import EndpointRegistry, _load_json, _write_json
 
 # ── paths ──────────────────────────────────────────────────────────────
 
@@ -41,16 +41,6 @@ def _nextcloud_files_endpoints_file() -> Path:
 def _nextcloud_tasks_endpoints_file() -> Path:
     return _emploi_config_dir() / "nextcloud_tasks.json"
 
-
-def _load_json(path: Path) -> dict[str, Any] | None:
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError as exc:
-        print(f"⚠ Warning: invalid JSON in {path}: {exc}", file=sys.stderr)
-        return None
 
 
 # ── accounts (profiles) ───────────────────────────────────────────────
@@ -111,10 +101,6 @@ def _load_document_profiles_payload() -> dict[str, Any]:
     default = str(data.get("default", "") or "")
     return {"default": default, "profiles": profiles}
 
-
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _expand_profile_path(path_value: str) -> str:
@@ -206,7 +192,8 @@ def set_default_document_profile(name: str) -> dict[str, Any]:
     data["default"] = name
     _write_json(_document_profiles_file(), data)
     profile = get_document_profile(name)
-    assert profile is not None
+    if profile is None:
+        raise RuntimeError(f"Profil documents introuvable après écriture: {name}")
     return profile
 
 
@@ -300,33 +287,15 @@ def _normalize_kanban_endpoint(name: str, raw: dict[str, Any], *, default_name: 
     }
 
 def list_kanban_endpoints() -> list[dict[str, Any]]:
-    data = _load_kanban_endpoints_payload()
-    default_name = str(data.get("default", "") or "")
-    endpoints = data.get("endpoints", {})
-    return [
-        _normalize_kanban_endpoint(name, raw, default_name=default_name)
-        for name, raw in sorted(endpoints.items())
-        if isinstance(raw, dict)
-    ]
+    return _kanban_registry.list()
 
 
 def get_kanban_endpoint(name: str) -> dict[str, Any] | None:
-    data = _load_kanban_endpoints_payload()
-    raw = data.get("endpoints", {}).get(name)
-    if not isinstance(raw, dict):
-        return None
-    return _normalize_kanban_endpoint(name, raw, default_name=str(data.get("default", "") or ""))
+    return _kanban_registry.get(name)
 
 
 def get_default_kanban_endpoint() -> dict[str, Any] | None:
-    data = _load_kanban_endpoints_payload()
-    default_name = str(data.get("default", "") or "")
-    if default_name:
-        found = get_kanban_endpoint(default_name)
-        if found is not None:
-            return found
-    endpoints = list_kanban_endpoints()
-    return endpoints[0] if endpoints else None
+    return _kanban_registry.get_default()
 
 
 def set_kanban_endpoint(
@@ -409,33 +378,15 @@ def _normalize_nextcloud_files_endpoint(name: str, raw: dict[str, Any], *, defau
 
 
 def list_nextcloud_files_endpoints() -> list[dict[str, Any]]:
-    data = _load_nextcloud_files_endpoints_payload()
-    default_name = str(data.get("default", "") or "")
-    endpoints = data.get("endpoints", {})
-    return [
-        _normalize_nextcloud_files_endpoint(name, raw, default_name=default_name)
-        for name, raw in sorted(endpoints.items())
-        if isinstance(raw, dict)
-    ]
+    return _nextcloud_files_registry.list()
 
 
 def get_nextcloud_files_endpoint(name: str) -> dict[str, Any] | None:
-    data = _load_nextcloud_files_endpoints_payload()
-    raw = data.get("endpoints", {}).get(name)
-    if not isinstance(raw, dict):
-        return None
-    return _normalize_nextcloud_files_endpoint(name, raw, default_name=str(data.get("default", "") or ""))
+    return _nextcloud_files_registry.get(name)
 
 
 def get_default_nextcloud_files_endpoint() -> dict[str, Any] | None:
-    data = _load_nextcloud_files_endpoints_payload()
-    default_name = str(data.get("default", "") or "")
-    if default_name:
-        found = get_nextcloud_files_endpoint(default_name)
-        if found is not None:
-            return found
-    endpoints = list_nextcloud_files_endpoints()
-    return endpoints[0] if endpoints else None
+    return _nextcloud_files_registry.get_default()
 
 
 def set_nextcloud_files_endpoint(
@@ -507,34 +458,23 @@ def _normalize_nextcloud_tasks_endpoint(name: str, raw: dict[str, Any], *, defau
     }
 
 
+# ── registry instances (must be after normalize functions) ─────────────
+
+_kanban_registry = EndpointRegistry(_kanban_endpoints_file, _normalize_kanban_endpoint)
+_nextcloud_files_registry = EndpointRegistry(_nextcloud_files_endpoints_file, _normalize_nextcloud_files_endpoint)
+_nextcloud_tasks_registry = EndpointRegistry(_nextcloud_tasks_endpoints_file, _normalize_nextcloud_tasks_endpoint)
+
+
 def list_nextcloud_tasks_endpoints() -> list[dict[str, Any]]:
-    data = _load_nextcloud_tasks_endpoints_payload()
-    default_name = str(data.get("default", "") or "")
-    endpoints = data.get("endpoints", {})
-    return [
-        _normalize_nextcloud_tasks_endpoint(name, raw, default_name=default_name)
-        for name, raw in sorted(endpoints.items())
-        if isinstance(raw, dict)
-    ]
+    return _nextcloud_tasks_registry.list()
 
 
 def get_nextcloud_tasks_endpoint(name: str) -> dict[str, Any] | None:
-    data = _load_nextcloud_tasks_endpoints_payload()
-    raw = data.get("endpoints", {}).get(name)
-    if not isinstance(raw, dict):
-        return None
-    return _normalize_nextcloud_tasks_endpoint(name, raw, default_name=str(data.get("default", "") or ""))
+    return _nextcloud_tasks_registry.get(name)
 
 
 def get_default_nextcloud_tasks_endpoint() -> dict[str, Any] | None:
-    data = _load_nextcloud_tasks_endpoints_payload()
-    default_name = str(data.get("default", "") or "")
-    if default_name:
-        found = get_nextcloud_tasks_endpoint(default_name)
-        if found is not None:
-            return found
-    endpoints = list_nextcloud_tasks_endpoints()
-    return endpoints[0] if endpoints else None
+    return _nextcloud_tasks_registry.get_default()
 
 
 def set_nextcloud_tasks_endpoint(

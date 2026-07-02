@@ -5,11 +5,9 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from emploi.browser.errors import ManagedBrowserError, ManagedBrowserUnavailableError
 from emploi.browser.models import BrowserCommandResult
 from emploi.cli import app
 from emploi.db import add_offer, connect, init_db, list_applications, list_offer_events
-
 
 runner = CliRunner()
 

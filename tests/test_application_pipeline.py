@@ -3,7 +3,6 @@ from typer.testing import CliRunner
 from emploi.cli import app
 from emploi.db import add_application, add_offer, connect, init_db, list_next_actions
 
-
 runner = CliRunner()
 
 

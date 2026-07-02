@@ -9,7 +9,6 @@ import pytest
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserCommandError, ManagedBrowserUnavailableError
 
-
 # ---------------------------------------------------------------------------
 # Helpers — lightweight HTTP server that records requests
 # ---------------------------------------------------------------------------

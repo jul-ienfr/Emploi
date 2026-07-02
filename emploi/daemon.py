@@ -16,10 +16,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sqlite3 import Connection
 
+from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
 from emploi.db import connect, init_db, list_saved_searches
 from emploi.france_travail.flows import run_saved_search
-from emploi.browser.client import ManagedBrowserClient
-from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
+from emploi.logging import get_logger
+
+logger = get_logger("daemon")
 
 POLL_INTERVAL_S = 5  # vérification arrêt tous les 5s
 
@@ -36,6 +38,7 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> None:
     profiles = list_saved_searches(conn, enabled=True)
     if not profiles:
         _print("Aucun profil actif — rien à exécuter")
+        logger.info("Aucun profil actif")
         return
 
     total = 0
@@ -46,13 +49,16 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> None:
             results = run_saved_search(conn, int(saved["id"]), site=site, profile=profile)
         except Exception as exc:
             _print(f"ERREUR {saved['name']}: {exc}")
+            logger.error("Erreur profil %s: %s", saved["name"], exc, exc_info=True)
             continue
         total += len(results)
         created += sum(1 for r in results if r.created)
         updated += sum(1 for r in results if not r.created)
         _print(f"  {saved['name']}: {len(results)} offre(s) traitée(s)")
+        logger.info("Profil %s: %d offre(s)", saved["name"], len(results))
 
     _print(f"Total: {total} offre(s) — créée(s): {created} — mise(s) à jour: {updated}")
+    logger.info("Cycle terminé: total=%d created=%d updated=%d", total, created, updated)
 
 
 def watch_loop(
@@ -68,7 +74,6 @@ def watch_loop(
     """
     interval_seconds = interval_minutes * 60
     shutdown = False
-    first_cycle = True
 
     def _on_sigint(sig, frame):
         nonlocal shutdown
@@ -81,19 +86,22 @@ def watch_loop(
     signal.signal(signal.SIGINT, _on_sigint)
     signal.signal(signal.SIGTERM, _on_sigint)
 
-    label = f"mode one-shot" if once else f"intervalle {interval_minutes} min"
+    label = "mode one-shot" if once else f"intervalle {interval_minutes} min"
     _print(f"Watch lancé — {label} — profils actifs exécutés à chaque cycle")
+    logger.info("Watch lancé: %s", label)
     if not once:
         _print("Ctrl+C pour arrêter")
 
     while not shutdown:
         _print("--- Cycle ---")
+        logger.debug("Cycle démarré")
         try:
             with connect() as conn:
                 init_db(conn)
                 _run_all_profiles(conn, site=site, profile=profile)
         except Exception as exc:
             _print(f"ERREUR cycle: {exc}")
+            logger.error("Erreur cycle: %s", exc, exc_info=True)
 
         if shutdown or once:
             break
@@ -105,3 +113,4 @@ def watch_loop(
             remaining -= POLL_INTERVAL_S
 
     _print("Watch arrêté proprement")
+    logger.info("Watch arrêté")

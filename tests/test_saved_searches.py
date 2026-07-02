@@ -1,5 +1,3 @@
-import subprocess
-import json
 
 from typer.testing import CliRunner
 
@@ -18,7 +16,6 @@ from emploi.db import (
     update_saved_search_last_run,
 )
 from emploi.france_travail.flows import run_saved_search
-
 
 runner = CliRunner()
 
@@ -350,7 +347,7 @@ def test_report_summary_and_next_actions_include_ft_operator_counts(tmp_path, mo
         is_active=True,
     )
     low = add_offer(conn, title="Vendeur", external_source="france-travail", is_active=True)
-    inactive = add_offer(conn, title="Inactive", external_source="france-travail", is_active=False)
+    add_offer(conn, title="Inactive", external_source="france-travail", is_active=False)
     add_application(conn, high, status="draft")
     add_application(conn, low, status="sent")
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from uuid import uuid4
 from pathlib import Path
+from uuid import uuid4
 
 from emploi.applications import create_application_draft
 from emploi.db import add_offer_event, get_saved_search, list_saved_searches

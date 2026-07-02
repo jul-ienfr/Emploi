@@ -1,5 +1,4 @@
 import json
-from unittest.mock import patch as _mock_patch
 
 import pytest
 from typer.testing import CliRunner
@@ -7,7 +6,6 @@ from typer.testing import CliRunner
 from emploi.browser.errors import ManagedBrowserUnavailableError
 from emploi.cli import app
 from emploi.db import add_application, add_offer, add_saved_search, connect, init_db, schedule_application_followup
-
 
 runner = CliRunner()
 

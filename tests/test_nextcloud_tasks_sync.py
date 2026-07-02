@@ -1,6 +1,6 @@
 import json
 
-from emploi.db import add_offer, connect, init_db, schedule_application_followup, list_offer_events
+from emploi.db import add_offer, connect, init_db, list_offer_events, schedule_application_followup
 from emploi.nextcloud_tasks import create_followup_task, sync_due_followup_tasks
 
 

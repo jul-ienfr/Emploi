@@ -1,8 +1,16 @@
-from typer.testing import CliRunner
 import pytest
+from typer.testing import CliRunner
 
 from emploi.cli import app
-from emploi.db import add_application, add_offer, connect, get_auto_followup_config, get_offer, init_db, list_applications
+from emploi.db import (
+    add_application,
+    add_offer,
+    connect,
+    get_auto_followup_config,
+    get_offer,
+    init_db,
+    list_applications,
+)
 from emploi.nextcloud_deck import DeckCardResult
 from emploi.nextcloud_files import NextcloudExportResult
 

@@ -6,7 +6,6 @@ from emploi.cli import app
 from emploi.db import connect, get_offer, init_db, list_offers
 from emploi.importers import import_offers_file
 
-
 runner = CliRunner()
 
 

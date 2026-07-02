@@ -11,6 +11,7 @@ from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
 from emploi.db import add_offer, add_offer_event, get_offer
 from emploi.france_travail.flows import SearchImportResult
 from emploi.scoring import score_offer
+from emploi.utils import _matches_terms
 
 HELLOWORK_BASE_URL = "https://www.hellowork.com"
 SEARCH_URL = f"{HELLOWORK_BASE_URL}/fr-fr/emploi/recherche.html"
@@ -160,7 +161,7 @@ def extract_hellowork_offers(html_text: str) -> list[dict[str, str]]:
             depth = 1
             i = start + len('<div')
             while i < len(html_text) and depth > 0:
-                if html_text[i:i+4] == '<div' and not html_text[i+4] in '0123456789' and html_text[i-1] not in '>':
+                if html_text[i:i+4] == '<div' and html_text[i+4] not in '0123456789' and html_text[i-1] not in '>':
                     depth += 1
                     i += 4
                 elif html_text[i:i+6] == '</div>':
@@ -250,33 +251,6 @@ def extract_hellowork_offers(html_text: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Relevance filter (same pattern as France Travail)
 # ---------------------------------------------------------------------------
-
-def _normalize(text: str) -> str:
-    """Strip accents and lowercase for fair comparison."""
-    import unicodedata
-    nfkd = unicodedata.normalize("NFKD", text.casefold())
-    return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
-
-
-def _matches_terms(text: str, query: str) -> bool:
-    """Check if text matches all positive terms and zero negative terms from query."""
-    normalized = _normalize(text)
-    positives: list[str] = []
-    negatives: list[str] = []
-    for quoted in re.findall(r'(-?)"([^"]+)"', query):
-        term = _normalize(quoted[1])
-        (negatives if quoted[0] else positives).append(term)
-    remainder = re.sub(r'-?"[^"]+"', ' ', query)
-    for token in re.findall(r"-?\w+", remainder, re.U):
-        term = _normalize(token.lstrip("-"))
-        if not term:
-            continue
-        if token.startswith("-"):
-            negatives.append(term)
-        else:
-            positives.append(term)
-    return all(term in normalized for term in positives) and not any(term and term in normalized for term in negatives)
-
 
 def _offer_is_relevant(offer: dict[str, str], *, query: str) -> bool:
     """Check if an offer is relevant to the query."""
@@ -411,8 +385,8 @@ _HELLOWORK_HEADERS = {
 
 def _fetch_hellowork_html(url: str) -> str:
     """Fetch HelloWork search page HTML via HTTP GET."""
-    from urllib.request import Request, urlopen
     from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
 
     req = Request(url, headers=_HELLOWORK_HEADERS)
     try:

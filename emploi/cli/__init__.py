@@ -1,27 +1,26 @@
 from __future__ import annotations
 
-import typer
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated
 
+import typer
 from rich.console import Console
 from rich.table import Table
 
+from emploi import __version__
+from emploi import config as emploi_config
 from emploi.applications import create_application_draft
 from emploi.auto_apply import run_auto_apply_for_enabled_profiles, run_auto_apply_for_saved_search
 from emploi.brief import build_brief
-from emploi.daemon import watch_loop
-from emploi.doctor import build_doctor_report
-
-from emploi import __version__, config as emploi_config
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserError
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
+from emploi.daemon import watch_loop
 from emploi.db import (
+    FEATURE_OPTIONS,
     add_application,
     add_offer,
-    FEATURE_OPTIONS,
     add_saved_search,
     application_summary,
     configure_saved_search_auto_apply,
@@ -31,9 +30,7 @@ from emploi.db import (
     get_boolean_option,
     get_followup_sync_config,
     get_offer,
-    validate_option_key,
     get_option,
-    normalize_followup_delay,
     get_saved_search,
     init_db,
     install_default_julien_search_profiles,
@@ -42,6 +39,7 @@ from emploi.db import (
     list_offers,
     list_options,
     list_saved_searches,
+    normalize_followup_delay,
     rescore_offer,
     schedule_application_followup,
     set_auto_followup_config,
@@ -51,7 +49,9 @@ from emploi.db import (
     toggle_boolean_option,
     update_application_status,
     update_offer_status,
+    validate_option_key,
 )
+from emploi.doctor import build_doctor_report
 from emploi.france_travail.extractors import extract_offers
 from emploi.france_travail.flows import (
     apply_check_offer,
@@ -66,6 +66,7 @@ from emploi.france_travail.flows import (
 from emploi.hellowork import apply_hellowork
 from emploi.hellowork_search import run_hellowork_saved_search, search_hellowork
 from emploi.importers import import_offers_file
+from emploi.logging import get_logger as _get_logger  # noqa: F401
 from emploi.nextcloud_deck import create_offer_card
 from emploi.nextcloud_files import export_application_to_nextcloud
 from emploi.nextcloud_tasks import create_followup_task, sync_due_followup_tasks
@@ -123,19 +124,21 @@ def _option_disabled_payload(key: str) -> dict[str, str]:
     return {"status": "disabled", "option": key, "message": f"Option désactivée: {key}"}
 
 
-def _option_is_enabled_without_creating_db(key: str) -> bool:
+def _option_is_enabled_without_creating_db(key: str, conn=None) -> bool:
     normalized = validate_option_key(key)
+    if conn is not None:
+        return get_boolean_option(conn, normalized)
     path = db_path()
     if not path.exists():
         return FEATURE_OPTIONS[normalized]
-    with connect(path) as conn:
-        init_db(conn)
-        return get_boolean_option(conn, normalized)
+    with connect(path) as conn_tmp:
+        init_db(conn_tmp)
+        return get_boolean_option(conn_tmp, normalized)
 
 
-def _ensure_option_enabled(key: str, *, json_output: bool = False) -> None:
+def _ensure_option_enabled(key: str, *, json_output: bool = False, conn=None) -> None:
     try:
-        enabled = _option_is_enabled_without_creating_db(key)
+        enabled = _option_is_enabled_without_creating_db(key, conn=conn)
     except ValueError as error:
         if json_output:
             console.print_json(data={"status": "error", "option": key, "message": str(error)})
@@ -177,10 +180,20 @@ def _format_auto_apply(saved) -> str:
 
 
 @app.callback(invoke_without_command=True)
-def main(version: bool = typer.Option(False, "--version", help="Afficher la version")) -> None:
+def main(
+    version: bool = typer.Option(False, "--version", help="Afficher la version"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Activer les logs de debug"),
+) -> None:
     if version:
         console.print(__version__)
         raise typer.Exit()
+    if verbose:
+        import os
+        os.environ["EMPLOI_LOG_LEVEL"] = "DEBUG"
+        # Force reconfiguration of logging
+        import emploi.logging as _log_mod
+        _log_mod._configured = False
+        _log_mod._ensure_configured()
 
 
 @app.command()
@@ -1476,7 +1489,6 @@ def auto_apply_run(
             if all_profiles:
                 results = run_auto_apply_for_enabled_profiles(conn, drafts_dir=drafts_dir, today=today)
             else:
-                assert profile_name is not None
                 results = [run_auto_apply_for_saved_search(conn, profile_name, drafts_dir=drafts_dir, today=today)]
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error

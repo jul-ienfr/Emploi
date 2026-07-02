@@ -3,7 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import subprocess
+import logging
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -12,6 +13,10 @@ from typing import Protocol
 
 from emploi.db import add_offer_event, get_application, get_offer, list_next_actions, list_offer_events
 from emploi.nextcloud_deck import compose_deck_card_title
+from emploi.retry import with_retry
+from emploi.utils import _first_url, _pass_show
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -31,13 +36,6 @@ class TasksClientProtocol(Protocol):
     def create_task(self, *, uid: str, summary: str, description: str, due_date: str) -> dict[str, object]: ...
 
 
-def _pass_show(entry: str) -> str:
-    if not entry:
-        return ""
-    result = subprocess.run(["pass", "show", entry], check=True, text=True, capture_output=True)
-    return result.stdout.splitlines()[0].strip()
-
-
 class NextcloudTasksClient:
     def __init__(self, endpoint: dict[str, object], *, username: str = "", password: str = "") -> None:
         self.endpoint = endpoint
@@ -55,14 +53,20 @@ class NextcloudTasksClient:
         encoded_calendar = urllib.parse.quote(self.calendar, safe="")
         return f"{self.base_url}{self.caldav_base_path}/{encoded_user}/{encoded_calendar}"
 
+    @with_retry(max_retries=3, base_delay=1.0, max_delay=15.0, retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError))
     def _request(self, method: str, url: str, data: bytes = b"", content_type: str = "text/calendar; charset=utf-8") -> bytes:
         request = urllib.request.Request(url, data=data if data else None, method=method)
         if data:
             request.add_header("Content-Type", content_type)
         token = f"{self.username}:{self.password}".encode()
         request.add_header("Authorization", "Basic " + base64.b64encode(token).decode())
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.read()
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 500, 502, 503, 504):
+                raise ConnectionError(f"Nextcloud CalDAV HTTP {exc.code}") from exc
+            raise
 
     def create_task(self, *, uid: str, summary: str, description: str, due_date: str) -> dict[str, object]:
         href = f"{self.calendar_url}/{urllib.parse.quote(uid, safe='')}.ics"
@@ -118,15 +122,8 @@ def build_vtodo(*, uid: str, summary: str, description: str, due_date: str) -> s
     return "\r\n".join(lines) + "\r\n"
 
 
-def _first_url(offer) -> str:
-    for key in ("browser_url", "apply_url", "url"):
-        if key in offer.keys() and str(offer[key] or "").strip():
-            return str(offer[key]).strip()
-    return ""
-
-
 def _followup_uid(endpoint_name: str, application_id: int, due_date: str) -> str:
-    digest = hashlib.sha1(f"{endpoint_name}:{application_id}:{due_date}".encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(f"{endpoint_name}:{application_id}:{due_date}".encode()).hexdigest()[:12]
     return f"emploi-followup-{application_id}-{digest}"
 
 

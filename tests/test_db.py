@@ -1,4 +1,4 @@
-from emploi.db import add_offer, connect, init_db, list_offers, get_offer, rescore_offer, update_offer_status
+from emploi.db import add_offer, connect, get_offer, init_db, list_offers, rescore_offer, update_offer_status
 
 
 def test_init_db_and_add_offer_roundtrip(tmp_path):
@@ -43,7 +43,7 @@ def test_list_offers_excludes_inactive_by_default(tmp_path):
     db_path = tmp_path / "emploi.sqlite"
     conn = connect(db_path)
     init_db(conn)
-    active = add_offer(conn, title="Actif", company="A")
+    add_offer(conn, title="Actif", company="A")
     inactive = add_offer(conn, title="Inactif", company="B")
     conn.execute("UPDATE offers SET is_active = 0 WHERE id = ?", (inactive,))
     conn.commit()

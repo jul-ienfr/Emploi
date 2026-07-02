@@ -1,27 +1,20 @@
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from emploi.browser.models import BrowserCommandResult
 from emploi.db import (
-    add_offer,
     add_saved_search,
     connect,
     get_offer,
     get_saved_search,
     init_db,
     list_saved_searches,
-    list_offer_events,
 )
+from emploi.france_travail.flows import SearchImportResult
 from emploi.hellowork_search import (
     build_hellowork_search_url,
     extract_hellowork_offers,
     search_hellowork,
 )
-from emploi.france_travail.flows import SearchImportResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -184,7 +177,6 @@ class TestExtractHelloworkOffers:
 
 class TestSearchHellowork:
     def test_search_hellowork_returns_import_results(self, tmp_path, monkeypatch):
-        from unittest.mock import patch as mock_patch
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
         monkeypatch.setattr(
@@ -206,8 +198,6 @@ class TestSearchHellowork:
         assert "hellowork.com" in results[0].browser_url
 
     def test_search_hellowork_calls_correct_url(self, tmp_path, monkeypatch):
-        from unittest.mock import patch as mock_patch
-        from urllib.parse import unquote
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
         urls_called = []
@@ -230,7 +220,6 @@ class TestSearchHellowork:
         assert "/fr-fr/emploi/recherche.html" in url
 
     def test_search_hellowork_upserts_offer_in_db(self, tmp_path, monkeypatch):
-        from unittest.mock import patch as mock_patch
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
         monkeypatch.setattr(
@@ -252,7 +241,6 @@ class TestSearchHellowork:
         assert "hellowork.com" in offer["browser_url"]
 
     def test_search_hellowork_idempotent_on_repeated_run(self, tmp_path, monkeypatch):
-        from unittest.mock import patch as mock_patch
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
         monkeypatch.setattr(
@@ -269,7 +257,6 @@ class TestSearchHellowork:
 
     def test_search_hellowork_filters_irrelevant_offers(self, tmp_path, monkeypatch):
         """Offers that don't match the query should be filtered out."""
-        from unittest.mock import patch as mock_patch
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
         monkeypatch.setattr(
@@ -288,7 +275,6 @@ class TestSearchHellowork:
         assert len(results) >= 1
 
     def test_search_hellowork_no_results_empty_html(self, tmp_path, monkeypatch):
-        from unittest.mock import patch as mock_patch
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
         monkeypatch.setattr(
@@ -383,7 +369,7 @@ class TestSearchProfileRunDispatch:
         monkeypatch.setenv("EMPLOI_DB", str(tmp_path / "emploi.sqlite"))
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
-        search_id = add_saved_search(
+        add_saved_search(
             conn,
             name="hw-profile",
             query="carreleur",
@@ -419,7 +405,7 @@ class TestSearchProfileRunDispatch:
         monkeypatch.setenv("EMPLOI_DB", str(tmp_path / "emploi.sqlite"))
         conn = connect(tmp_path / "emploi.sqlite")
         init_db(conn)
-        search_id = add_saved_search(
+        add_saved_search(
             conn,
             name="ft-profile",
             query="support",

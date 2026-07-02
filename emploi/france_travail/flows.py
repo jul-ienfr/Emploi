@@ -8,15 +8,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urljoin, urlencode
+from urllib.parse import urlencode, urljoin
 
+from emploi.applications import create_application_draft
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
-from emploi.applications import create_application_draft
 from emploi.db import add_offer, add_offer_event, get_offer, get_saved_search, update_saved_search_last_run
 from emploi.france_travail.distance import within_requested_radius
 from emploi.france_travail.extractors import ExtractedOffer, _offer_from_mapping, extract_offer_detail, extract_offers
 from emploi.scoring import score_offer
+from emploi.utils import _matches_terms
 
 FT_SEARCH_URL = "https://candidat.francetravail.fr/offres/recherche"
 EXTERNAL_SOURCE = "france-travail"
@@ -177,21 +178,6 @@ def _find_existing(conn, offer: ExtractedOffer):
             (offer.browser_url,),
         ).fetchone()
     return None
-
-
-def _matches_terms(text: str, query: str) -> bool:
-    normalized = text.casefold()
-    positives: list[str] = []
-    negatives: list[str] = []
-    for quoted in re.findall(r'(-?)"([^"]+)"', query):
-        (negatives if quoted[0] else positives).append(quoted[1].casefold())
-    remainder = re.sub(r'-?"[^"]+"', ' ', query)
-    for token in re.findall(r"-?\w+", remainder, re.U):
-        if token.startswith('-'):
-            negatives.append(token[1:].casefold())
-        else:
-            positives.append(token.casefold())
-    return all(term in normalized for term in positives) and not any(term and term in normalized for term in negatives)
 
 
 def _offer_is_relevant(
@@ -731,11 +717,6 @@ def apply_check_offer(
         url,
         partner_handoff or None,
     )
-
-
-def _safe_slug(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-").lower()
-    return slug[:80] or "offre"
 
 
 def draft_application(conn, offer_id: int, *, drafts_dir: str | Path | None = None) -> DraftResult:

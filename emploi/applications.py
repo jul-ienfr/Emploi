@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from emploi.db import add_offer_event, get_offer, upsert_draft_application
+from emploi.utils import _safe_slug
 
 DEFAULT_DRAFTS_DIR = Path.home() / ".local" / "share" / "emploi" / "drafts"
 
@@ -15,11 +15,6 @@ class ApplicationDraftResult:
     offer_id: int
     application_id: int
     draft_path: Path
-
-
-def _safe_slug(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-").lower()
-    return slug[:80] or "offre"
 
 
 def _first_non_empty(*values: object) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from typing import Any
@@ -9,6 +10,13 @@ from urllib.request import Request, urlopen
 
 from emploi.browser.errors import ManagedBrowserCommandError, ManagedBrowserUnavailableError
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE, BrowserCommandResult
+from emploi.retry import with_retry
+
+logger = logging.getLogger(__name__)
+
+# Per-operation timeout overrides (seconds).
+_TIMEOUT_STATUS = 10.0
+_TIMEOUT_OPEN = 120.0
 
 
 class ManagedBrowserClient:
@@ -130,6 +138,14 @@ class ManagedBrowserClient:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _get_timeout(self, action: str) -> float:
+        """Return a timeout appropriate for *action*."""
+        if action == "status":
+            return _TIMEOUT_STATUS
+        if action in ("open", "lifecycle_open"):
+            return _TIMEOUT_OPEN
+        return self.timeout
+
     def _parse_timeout(self, timeout: float | int | None) -> float:
         raw: object = (
             timeout
@@ -200,25 +216,14 @@ class ManagedBrowserClient:
                 "Accept": "application/json",
             },
         )
+        timeout = self._get_timeout(action)
+        logger.debug("Browser %s %s (timeout=%.0fs)", method, url, timeout)
         try:
-            with urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read().decode()
-        except HTTPError as exc:
-            error_body = ""
-            try:
-                error_body = exc.read().decode()[:500]
-            except Exception:
-                pass
-            raise ManagedBrowserCommandError(
-                f"Managed Browser HTTP {exc.code}; "
-                f"subcommand={action}; site={site}; profile={profile}; "
-                f"body={error_body!r}"
-            ) from exc
-        except URLError as exc:
-            raise ManagedBrowserUnavailableError(
-                f"Managed Browser unreachable at {self.base_url}: {exc.reason}. "
-                f"Check that the server is running (port {self.base_url.rsplit(':', 1)[-1]})."
-            ) from exc
+            raw = self._http_request(req, timeout)
+        except ManagedBrowserUnavailableError:
+            raise
+        except ManagedBrowserCommandError:
+            raise
 
         try:
             payload: Any = json.loads(raw)
@@ -234,3 +239,25 @@ class ManagedBrowserClient:
                 f"subcommand={action}; site={site}; profile={profile}"
             )
         return payload
+
+    @with_retry(max_retries=3, base_delay=1.0, max_delay=10.0, retryable_exceptions=(URLError,))
+    def _http_request(self, req: Request, timeout: float) -> str:
+        """Execute an HTTP request with retry on transient errors."""
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode()
+        except HTTPError as exc:
+            error_body = ""
+            try:
+                error_body = exc.read().decode()[:500]
+            except Exception:
+                pass
+            raise ManagedBrowserCommandError(
+                f"Managed Browser HTTP {exc.code}; "
+                f"body={error_body!r}"
+            ) from exc
+        except URLError as exc:
+            raise ManagedBrowserUnavailableError(
+                f"Managed Browser unreachable at {self.base_url}: {exc.reason}. "
+                f"Check that the server is running (port {self.base_url.rsplit(':', 1)[-1]})."
+            ) from exc

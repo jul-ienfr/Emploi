@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import re
-import subprocess
-import unicodedata
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,6 +11,10 @@ from typing import Protocol
 
 from emploi.applications import create_application_draft
 from emploi.db import add_offer_event, get_offer
+from emploi.retry import with_retry
+from emploi.utils import _pass_show, _safe_slug
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -32,12 +34,6 @@ class WebDAVClientProtocol(Protocol):
     def upload_file(self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream") -> None: ...
 
 
-def _safe_slug(value: str) -> str:
-    ascii_value = unicodedata.normalize("NFKD", value.strip()).encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", ascii_value).strip("-").lower()
-    return slug[:80] or "offre"
-
-
 def _join_remote(*parts: str) -> str:
     cleaned: list[str] = []
     for part in parts:
@@ -45,13 +41,6 @@ def _join_remote(*parts: str) -> str:
         if text:
             cleaned.append(text)
     return "/" + "/".join(cleaned)
-
-
-def _pass_show(entry: str) -> str:
-    if not entry:
-        return ""
-    result = subprocess.run(["pass", "show", entry], check=True, text=True, capture_output=True)
-    return result.stdout.splitlines()[0].strip()
 
 
 class NextcloudWebDAVClient:
@@ -79,6 +68,7 @@ class NextcloudWebDAVClient:
         path = path.strip("/")
         return self.root_url if not path else f"{self.root_url}/{urllib.parse.quote(path, safe='/') }"
 
+    @with_retry(max_retries=3, base_delay=1.0, max_delay=15.0, retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError))
     def _request(self, method: str, remote_path: str, *, data: bytes | None = None, content_type: str = "") -> None:
         url = self._url_for(remote_path)
         request = urllib.request.Request(url, data=data, method=method)
@@ -93,6 +83,8 @@ class NextcloudWebDAVClient:
         except urllib.error.HTTPError as error:
             if method == "MKCOL" and error.code in {405, 409}:
                 return
+            if error.code in (429, 500, 502, 503, 504):
+                raise ConnectionError(f"Nextcloud WebDAV HTTP {error.code}") from error
             raise
 
     def ensure_dir(self, remote_path: str) -> None:

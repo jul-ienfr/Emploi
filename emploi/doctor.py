@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from emploi import __version__, config as _config
+from emploi import __version__
+from emploi import config as _config
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserError, ManagedBrowserUnavailableError
 from emploi.db import connect, db_path, init_db
@@ -29,7 +30,7 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     elif not managed_browser_ok:
         actions.append("Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser (défaut: emploi-candidature/france-travail) est disponible et connecté.")
     if accounts.get("status") != "ok":
-        actions.append(f"Configurer les comptes France Travail : créer ~/.config/emploi/accounts.json avec les deux profils (candidature, officiel).")
+        actions.append("Configurer les comptes France Travail : créer ~/.config/emploi/accounts.json avec les deux profils (candidature, officiel).")
 
     return {
         "status": status,

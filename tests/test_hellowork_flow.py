@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import json
 
-from emploi.db import add_application, add_offer, connect, get_offer, init_db, list_applications, list_offer_events, update_offer_status, upsert_draft_application
+from emploi.db import (
+    add_application,
+    add_offer,
+    connect,
+    get_offer,
+    init_db,
+    list_applications,
+    list_offer_events,
+    update_offer_status,
+    upsert_draft_application,
+)
 from emploi.hellowork import _read_draft_message, apply_hellowork, inspect_hellowork_form
 
 

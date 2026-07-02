@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
-from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
-from emploi.browser.client import ManagedBrowserClient
-from emploi.browser.errors import ManagedBrowserUnavailableError, ManagedBrowserError
+from emploi.browser.errors import ManagedBrowserUnavailableError
 from emploi.browser.models import BrowserCommandResult
 from emploi.cli import app
-
 
 runner = CliRunner()
 

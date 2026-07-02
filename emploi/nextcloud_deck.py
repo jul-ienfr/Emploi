@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import base64
 import json
-import subprocess
+import logging
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
 from emploi.db import add_offer_event, get_offer, list_offer_events
+from emploi.retry import with_retry
+from emploi.utils import _first_url, _pass_show
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -26,13 +31,6 @@ class DeckClientProtocol(Protocol):
     def create_card(self, *, stack_id: int, title: str, description: str, order: int = 999) -> dict[str, object]: ...
 
 
-def _pass_show(entry: str) -> str:
-    if not entry:
-        return ""
-    result = subprocess.run(["pass", "show", entry], check=True, text=True, capture_output=True)
-    return result.stdout.splitlines()[0].strip()
-
-
 class NextcloudDeckClient:
     def __init__(self, endpoint: dict[str, object], *, username: str = "", password: str = "") -> None:
         self.endpoint = endpoint
@@ -44,6 +42,7 @@ class NextcloudDeckClient:
         if not self.base_url or self.board_id <= 0:
             raise ValueError("Endpoint Deck incomplet")
 
+    @with_retry(max_retries=3, base_delay=1.0, max_delay=15.0, retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError))
     def _request_json(self, method: str, path: str, payload: dict[str, object]) -> dict[str, object]:
         url = f"{self.base_url}{self.api_base_path}/boards/{self.board_id}{path}"
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -51,8 +50,13 @@ class NextcloudDeckClient:
         request.add_header("Content-Type", "application/json")
         token = f"{self.username}:{self.password}".encode()
         request.add_header("Authorization", "Basic " + base64.b64encode(token).decode())
-        with urllib.request.urlopen(request, timeout=30) as response:
-            text = response.read().decode("utf-8")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                text = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 500, 502, 503, 504):
+                raise ConnectionError(f"Nextcloud Deck HTTP {exc.code}") from exc
+            raise
         return json.loads(text) if text.strip() else {}
 
     def create_card(self, *, stack_id: int, title: str, description: str, order: int = 999) -> dict[str, object]:
@@ -62,13 +66,6 @@ class NextcloudDeckClient:
             f"/stacks/{int(stack_id)}/cards",
             {"title": title, "description": description, "type": "plain", "order": int(order)},
         )
-
-
-def _first_url(offer) -> str:
-    for key in ("browser_url", "apply_url", "url"):
-        if key in offer.keys() and str(offer[key] or "").strip():
-            return str(offer[key]).strip()
-    return ""
 
 
 def compose_deck_card_title(offer) -> str:

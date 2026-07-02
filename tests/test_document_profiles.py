@@ -5,7 +5,6 @@ from typer.testing import CliRunner
 from emploi.cli import app
 from emploi.config import get_default_document_profile, get_document_profile, list_document_profiles
 
-
 runner = CliRunner()
 
 

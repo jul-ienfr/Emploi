@@ -15,7 +15,6 @@ from emploi.db import (
     validate_option_key,
 )
 
-
 runner = CliRunner()
 
 

@@ -7,7 +7,6 @@ from typer.testing import CliRunner
 import emploi.config as emploi_config
 from emploi.cli import app
 
-
 runner = CliRunner()
 
 

@@ -6,7 +6,6 @@ from typer.testing import CliRunner
 from emploi.cli import app
 from emploi.db import add_offer, connect, init_db, set_boolean_option
 
-
 runner = CliRunner()
 
 
