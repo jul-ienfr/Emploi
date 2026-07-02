@@ -36,7 +36,9 @@ def document_profile_set(
     cover_letter_path: str = typer.Option("", "--letter", "--lm", help="Chemin de la lettre de motivation PDF"),
     notes: str = typer.Option("", "--notes", help="Notes opérateur pour ce profil"),
     make_default: bool = typer.Option(False, "--default", help="Définir ce profil comme profil documents par défaut"),
-    allow_missing: bool = typer.Option(False, "--allow-missing", help="Enregistrer même si les fichiers n'existent pas encore"),
+    allow_missing: bool = typer.Option(
+        False, "--allow-missing", help="Enregistrer même si les fichiers n'existent pas encore"
+    ),
 ) -> None:
     """Crée ou met à jour un profil documents emploi: CV + lettre de motivation."""
     try:
@@ -106,10 +108,12 @@ def document_profile_status(
         else:
             console.print("Aucun profil documents configuré.")
         raise typer.Exit(1)
-    payload = {"status": _document_profile_status(profile), "profile": profile}
+    payload = {"status": _document_profile_status(profile), "profile": profile}  # type: ignore[dict-item]
     if json_output:
         console.print_json(data=payload)
         return
     console.print(f"Profil documents {profile['name']} — {payload['status']}")
     console.print(f"CV : {profile.get('cv_path', '')} ({'ok' if profile.get('cv_exists') else 'manquant'})")
-    console.print(f"LM : {profile.get('cover_letter_path', '')} ({'ok' if profile.get('cover_letter_exists') else 'manquante'})")
+    console.print(
+        f"LM : {profile.get('cover_letter_path', '')} ({'ok' if profile.get('cover_letter_exists') else 'manquante'})"
+    )

@@ -311,7 +311,7 @@ def add_offer(
         ),
     )
     conn.commit()
-    return int(cursor.lastrowid)
+    return int(cursor.lastrowid)  # type: ignore[arg-type]
 
 
 def get_offer(conn: sqlite3.Connection, offer_id: int) -> sqlite3.Row | None:
@@ -384,7 +384,7 @@ def add_application(
     )
     update_offer_status(conn, offer_id, "applied")
     conn.commit()
-    return int(cursor.lastrowid)
+    return int(cursor.lastrowid)  # type: ignore[arg-type]
 
 
 def get_application(conn: sqlite3.Connection, application_id: int) -> sqlite3.Row | None:
@@ -458,7 +458,7 @@ def upsert_draft_application(
             "INSERT INTO applications (offer_id, status, draft_path, notes) VALUES (?, ?, ?, ?)",
             (offer_id, "draft", draft_path, stored_notes),
         )
-        application_id = int(cursor.lastrowid)
+        application_id = int(cursor.lastrowid)  # type: ignore[arg-type]
     conn.execute("UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", ("draft", offer_id))
     conn.commit()
     return application_id
@@ -524,7 +524,7 @@ def add_offer_event(
         (offer_id, event_type, message, payload_json),
     )
     conn.commit()
-    return int(cursor.lastrowid)
+    return int(cursor.lastrowid)  # type: ignore[arg-type]
 
 
 def list_offer_events(conn: sqlite3.Connection, offer_id: int) -> list[sqlite3.Row]:
@@ -568,10 +568,20 @@ def add_saved_search(
         INSERT INTO saved_searches (name, query, where_text, radius, requested_radius, contract, enabled, notes, source)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, query, where_text, france_travail_radius, requested_radius, contract, 1 if enabled else 0, notes, source),
+        (
+            name,
+            query,
+            where_text,
+            france_travail_radius,
+            requested_radius,
+            contract,
+            1 if enabled else 0,
+            notes,
+            source,
+        ),
     )
     conn.commit()
-    return int(cursor.lastrowid)
+    return int(cursor.lastrowid)  # type: ignore[arg-type]
 
 
 JULIEN_DEFAULT_SEARCH_PROFILES: tuple[dict[str, object], ...] = (
@@ -624,7 +634,7 @@ def install_default_julien_search_profiles(conn: sqlite3.Connection) -> dict[str
             name=str(profile["name"]),
             query=str(profile["query"]),
             where_text=str(profile["where_text"]),
-            radius=int(profile["radius"]),
+            radius=int(profile["radius"]),  # type: ignore[call-overload]
             contract=str(profile["contract"]),
             enabled=True,
             notes=str(profile["notes"]),

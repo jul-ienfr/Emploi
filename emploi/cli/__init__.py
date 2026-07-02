@@ -65,6 +65,7 @@ console = Console(soft_wrap=True)
 # Shared helpers used by multiple command modules
 # ---------------------------------------------------------------------------
 
+
 def _print_browser_result(result) -> None:
     console.print(f"Managed Browser {result.command} — site={result.site} profile={result.profile}")
     console.print_json(data=result.payload)
@@ -145,6 +146,7 @@ def _format_auto_apply(saved) -> str:
 # Helpers shared across command modules (application, search_profile, etc.)
 # ---------------------------------------------------------------------------
 
+
 def _parse_today(today: str | None = None) -> date:
     if not today:
         return date.today()
@@ -189,15 +191,19 @@ def _application_status_update(application_id: int, status: str) -> None:
     console.print(f"Candidature #{application_id} → {application['status']}")
 
 
-def _schedule_followup_for_offer(offer_id: int, *, after: str = "", force: bool = False, today: str | None = None) -> None:
+def _schedule_followup_for_offer(
+    offer_id: int, *, after: str = "", force: bool = False, today: str | None = None
+) -> None:
     try:
         with connect() as conn:
             init_db(conn)
             config = get_auto_followup_config(conn)
             if not config["enabled"] and not force:
-                console.print("Relance auto désactivée. Utilise `application followup-config enable --after 10d` ou --force.")
+                console.print(
+                    "Relance auto désactivée. Utilise `application followup-config enable --after 10d` ou --force."
+                )
                 return
-            delay_days = normalize_followup_delay(after) if after else int(config["delay_days"])
+            delay_days = normalize_followup_delay(after) if after else int(config["delay_days"])  # type: ignore[call-overload]
             followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
             application_id = add_application(conn, offer_id, status="sent")
             application = schedule_application_followup(conn, application_id, followup_date)
@@ -279,6 +285,7 @@ def _print_brief_applications(title: str, applications: list[dict[str, object]])
 # Main callback + init command
 # ---------------------------------------------------------------------------
 
+
 @app.callback(invoke_without_command=True)
 def main(
     version: bool = typer.Option(False, "--version", help="Afficher la version"),
@@ -289,9 +296,11 @@ def main(
         raise typer.Exit()
     if verbose:
         import os
+
         os.environ["EMPLOI_LOG_LEVEL"] = "DEBUG"
         # Force reconfiguration of logging
         import emploi.logging as _log_mod
+
         _log_mod._configured = False
         _log_mod._ensure_configured()
 

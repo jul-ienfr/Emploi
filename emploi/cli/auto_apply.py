@@ -13,7 +13,9 @@ console = Console(soft_wrap=True)
 @auto_apply_app.command("run")
 def auto_apply_run(
     profile_name: str | None = typer.Option(None, "--profile", help="Nom ou ID du profil à exécuter"),
-    all_profiles: bool = typer.Option(False, "--all-enabled", help="Exécuter tous les profils actifs avec auto-apply actif"),
+    all_profiles: bool = typer.Option(
+        False, "--all-enabled", help="Exécuter tous les profils actifs avec auto-apply actif"
+    ),
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
     today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
 ) -> None:
@@ -27,7 +29,7 @@ def auto_apply_run(
             if all_profiles:
                 results = run_auto_apply_for_enabled_profiles(conn, drafts_dir=drafts_dir, today=today)
             else:
-                results = [run_auto_apply_for_saved_search(conn, profile_name, drafts_dir=drafts_dir, today=today)]
+                results = [run_auto_apply_for_saved_search(conn, profile_name, drafts_dir=drafts_dir, today=today)]  # type: ignore[arg-type]
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
 

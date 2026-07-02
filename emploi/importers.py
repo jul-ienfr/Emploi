@@ -111,7 +111,7 @@ def import_offers_file(
             continue
         existing = find_existing_offer(conn, source=source_name, external_id=data["external_id"], url=data["url"])
         if existing is None:
-            offer_id = add_offer(conn, **data)
+            offer_id = add_offer(conn, **data)  # type: ignore[arg-type]
             created += 1
             imported.append(ImportedOffer(offer_id=offer_id, created=True, title=data["title"], url=data["url"]))
         else:
@@ -174,7 +174,17 @@ def update_imported_offer(conn: sqlite3.Connection, offer_id: int, data: dict[st
     if existing is None:
         raise ValueError(f"Offre introuvable: {offer_id}")
     update_data = dict(data)
-    for field_name in ("company", "location", "description", "salary", "remote", "contract_type", "notes", "external_id", "url"):
+    for field_name in (
+        "company",
+        "location",
+        "description",
+        "salary",
+        "remote",
+        "contract_type",
+        "notes",
+        "external_id",
+        "url",
+    ):
         if not update_data[field_name]:
             update_data[field_name] = str(existing[field_name] or "")
     scored = score_offer({**dict(existing), **update_data})

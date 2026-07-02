@@ -30,8 +30,12 @@ FT_LOCATION_CODES = {
 
 class BrowserLike(Protocol):
     def open(self, url: str, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult: ...
-    def lifecycle_open(self, url: str, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult: ...
-    def snapshot(self, *, label: str | None = None, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> BrowserCommandResult: ...
+    def lifecycle_open(
+        self, url: str, *, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE
+    ) -> BrowserCommandResult: ...
+    def snapshot(
+        self, *, label: str | None = None, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE
+    ) -> BrowserCommandResult: ...
 
 
 @dataclass(frozen=True)
@@ -110,9 +114,9 @@ def _france_travail_keywords(query: str) -> str:
     for quoted in re.findall(r'(-?)"([^"]+)"', normalized):
         if not quoted[0]:
             positives.append(quoted[1])
-    remainder = re.sub(r'-?"[^"]+"', ' ', normalized)
+    remainder = re.sub(r'-?"[^"]+"', " ", normalized)
     for token in re.findall(r"-?\w+", remainder, re.U):
-        if not token.startswith('-'):
+        if not token.startswith("-"):
             positives.append(token)
     return " ".join(positives).strip() or normalized
 
@@ -139,7 +143,7 @@ Array.from(document.querySelectorAll('li.result')).map(li => {
         nested = result.payload.get("result") if isinstance(result.payload, dict) else None
         value = nested.get("value") if isinstance(nested, dict) else []
     offers: list[ExtractedOffer] = []
-    for item in value:
+    for item in value:  # type: ignore[union-attr]
         if isinstance(item, dict):
             offer = _offer_from_mapping(item)
             if offer:
@@ -188,10 +192,16 @@ def _offer_is_relevant(
     origin_location: str = "",
     requested_radius: int = 0,
 ) -> bool:
-    text = " ".join((offer.title, offer.company, offer.location, offer.description, offer.contract_type, offer.raw_text))
+    text = " ".join(
+        (offer.title, offer.company, offer.location, offer.description, offer.contract_type, offer.raw_text)
+    )
     if query and not _matches_terms(text, query):
         return False
-    if contract and contract.casefold() not in offer.contract_type.casefold() and contract.casefold() not in text.casefold():
+    if (
+        contract
+        and contract.casefold() not in offer.contract_type.casefold()
+        and contract.casefold() not in text.casefold()
+    ):
         return False
     if not within_requested_radius(origin_location, offer.location or offer.raw_text, requested_radius):
         return False
@@ -229,9 +239,7 @@ def _mark_existing_excluded_offers_inactive(
 ) -> None:
     """Deactivate previously imported FT offers excluded by current client filters."""
     relevant_keys = {
-        (offer.external_id or offer.browser_url)
-        for offer in relevant
-        if offer.external_id or offer.browser_url
+        (offer.external_id or offer.browser_url) for offer in relevant if offer.external_id or offer.browser_url
     }
     for offer in extracted:
         key = offer.external_id or offer.browser_url
@@ -248,7 +256,9 @@ def _upsert_extracted_offer(conn, offer: ExtractedOffer, snapshot_payload: dict)
     raw_snapshot = _raw_json(snapshot_payload)
     existing = _find_existing(conn, offer)
     merged = dict(existing) if existing else {}
-    merged.update({"title": offer.title, "company": offer.company, "location": offer.location, "description": offer.description})
+    merged.update(
+        {"title": offer.title, "company": offer.company, "location": offer.location, "description": offer.description}
+    )
     scored = score_offer(merged)
     if existing:
         external_id = offer.external_id or str(existing["external_id"] or "")
@@ -310,7 +320,9 @@ def _upsert_extracted_offer(conn, offer: ExtractedOffer, snapshot_payload: dict)
     )
     add_offer_event(conn, offer_id, event_type="search_imported", message="Imported from France Travail search")
     row = get_offer(conn, offer_id)
-    return SearchImportResult(offer_id, True, offer.title, int(row["score"] if row else scored.score), offer.browser_url)
+    return SearchImportResult(
+        offer_id, True, offer.title, int(row["score"] if row else scored.score), offer.browser_url
+    )
 
 
 def search_offers(
@@ -434,7 +446,9 @@ def _looks_like_snapshot_metadata(text: str) -> bool:
     return '"operation": "snapshot"' in stripped or '"observable_state"' in stripped
 
 
-def _best_detail_text(snapshot_payload: dict, detail_text: str, browser: BrowserLike, *, site: str, profile: str) -> str:
+def _best_detail_text(
+    snapshot_payload: dict, detail_text: str, browser: BrowserLike, *, site: str, profile: str
+) -> str:
     text = _extract_detail_text(snapshot_payload, detail_text).strip()
     if _looks_like_snapshot_metadata(text):
         dom_text = _extract_browser_dom_offer_detail(browser, site=site, profile=profile)
@@ -579,9 +593,7 @@ def _detect_partner_handoff(payload: object) -> list[dict[str, str]]:
         link_match = link_pattern.search(text)
         if not link_match:
             labelled_link_pattern = re.compile(
-                "<a\\b[^>]*href=[\\\"']([^\\\"']+)[\\\"'][^>]*>(?:(?!</a>).)*"
-                + re.escape(name)
-                + "(?:(?!</a>).)*</a>",
+                "<a\\b[^>]*href=[\\\"']([^\\\"']+)[\\\"'][^>]*>(?:(?!</a>).)*" + re.escape(name) + "(?:(?!</a>).)*</a>",
                 re.I | re.S,
             )
             link_match = labelled_link_pattern.search(text)
@@ -655,14 +667,20 @@ def apply_check_offer(
         detail_active = detail.is_active
         has_apply_signal = detail.can_apply
         partner_handoff = _detect_partner_handoff(snapshot.payload)
-        if has_apply_signal and not any(partner.get("url") for partner in partner_handoff) and _expand_apply_options(client, site=site, profile=profile):
+        if (
+            has_apply_signal
+            and not any(partner.get("url") for partner in partner_handoff)
+            and _expand_apply_options(client, site=site, profile=profile)
+        ):
             expanded_partner_handoff: list[dict[str, str]] = []
             expanded_snapshot = snapshot
             expanded_detail = detail
             for attempt in range(3):
                 if attempt:
                     time.sleep(0.5)
-                expanded_snapshot = client.snapshot(label=f"ft-apply-check-{offer_id}-expanded", site=site, profile=profile)
+                expanded_snapshot = client.snapshot(
+                    label=f"ft-apply-check-{offer_id}-expanded", site=site, profile=profile
+                )
                 expanded_detail = extract_offer_detail(expanded_snapshot.payload)
                 expanded_partner_handoff = _detect_partner_handoff(expanded_snapshot.payload)
                 dom_partner_handoff = _extract_partner_handoff_from_dom(client, site=site, profile=profile)
@@ -682,7 +700,14 @@ def apply_check_offer(
                 apply_url = COALESCE(NULLIF(?, ''), apply_url), updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (1 if detail.is_active else 0, _now(), _raw_json(snapshot.payload), detail.text, detail.apply_url, offer_id),
+            (
+                1 if detail.is_active else 0,
+                _now(),
+                _raw_json(snapshot.payload),
+                detail.text,
+                detail.apply_url,
+                offer_id,
+            ),
         )
         conn.commit()
     if not stored_active or not detail_active:
@@ -724,7 +749,9 @@ def draft_application(conn, offer_id: int, *, drafts_dir: str | Path | None = No
     return DraftResult(result.offer_id, result.application_id, result.draft_path)
 
 
-def open_offer(conn, offer_id: int, *, browser: BrowserLike | None = None, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE) -> str:
+def open_offer(
+    conn, offer_id: int, *, browser: BrowserLike | None = None, site: str = DEFAULT_SITE, profile: str = DEFAULT_PROFILE
+) -> str:
     offer = get_offer(conn, offer_id)
     if offer is None:
         raise ValueError(f"Offre introuvable: {offer_id}")

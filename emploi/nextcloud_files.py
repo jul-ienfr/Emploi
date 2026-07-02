@@ -31,7 +31,9 @@ class WebDAVClientProtocol(Protocol):
 
     def upload_text(self, remote_path: str, content: str, content_type: str = "text/plain; charset=utf-8") -> None: ...
 
-    def upload_file(self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream") -> None: ...
+    def upload_file(
+        self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream"
+    ) -> None: ...
 
 
 def _join_remote(*parts: str) -> str:
@@ -68,7 +70,12 @@ class NextcloudWebDAVClient:
         path = path.strip("/")
         return self.root_url if not path else f"{self.root_url}/{urllib.parse.quote(path, safe='/') }"
 
-    @with_retry(max_retries=3, base_delay=1.0, max_delay=15.0, retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError))
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=15.0,
+        retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError),
+    )  # type: ignore[misc, arg-type]
     def _request(self, method: str, remote_path: str, *, data: bytes | None = None, content_type: str = "") -> None:
         url = self._url_for(remote_path)
         request = urllib.request.Request(url, data=data, method=method)
@@ -88,13 +95,15 @@ class NextcloudWebDAVClient:
             raise
 
     def ensure_dir(self, remote_path: str) -> None:
-        self._request("MKCOL", remote_path)
+        self._request("MKCOL", remote_path)  # type: ignore[misc]
 
     def upload_text(self, remote_path: str, content: str, content_type: str = "text/plain; charset=utf-8") -> None:
-        self._request("PUT", remote_path, data=content.encode("utf-8"), content_type=content_type)
+        self._request("PUT", remote_path, data=content.encode("utf-8"), content_type=content_type)  # type: ignore[misc]
 
-    def upload_file(self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream") -> None:
-        self._request("PUT", remote_path, data=Path(local_path).read_bytes(), content_type=content_type)
+    def upload_file(
+        self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream"
+    ) -> None:
+        self._request("PUT", remote_path, data=Path(local_path).read_bytes(), content_type=content_type)  # type: ignore[misc]
 
 
 def compose_offer_markdown(offer) -> str:
@@ -188,7 +197,11 @@ def export_application_to_nextcloud(
     dav.ensure_dir(remote_dir)
     draft = create_application_draft(conn, offer_id, drafts_dir=drafts_dir)
     dav.upload_text(_join_remote(remote_dir, "offre.md"), compose_offer_markdown(offer), "text/markdown; charset=utf-8")
-    dav.upload_text(_join_remote(remote_dir, "brouillon.md"), draft.draft_path.read_text(encoding="utf-8"), "text/markdown; charset=utf-8")
+    dav.upload_text(
+        _join_remote(remote_dir, "brouillon.md"),
+        draft.draft_path.read_text(encoding="utf-8"),
+        "text/markdown; charset=utf-8",
+    )
     for filename, local_path in document_files:
         dav.upload_file(_join_remote(remote_dir, filename), local_path)
     add_offer_event(
@@ -201,7 +214,9 @@ def export_application_to_nextcloud(
                 "remote_dir": remote_dir,
                 "files": uploaded,
                 "web_url": result.web_url,
-                "document_profile": str(document_profile.get("name", "") or "") if include_documents and document_profile else "",
+                "document_profile": str(document_profile.get("name", "") or "")
+                if include_documents and document_profile
+                else "",
             },
             ensure_ascii=False,
             sort_keys=True,

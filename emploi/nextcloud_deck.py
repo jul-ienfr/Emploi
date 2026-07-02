@@ -37,12 +37,19 @@ class NextcloudDeckClient:
         self.username = username or _pass_show(str(endpoint.get("username_pass", "") or ""))
         self.password = password or _pass_show(str(endpoint.get("password_pass", "") or ""))
         self.base_url = str(endpoint.get("base_url", "") or "").rstrip("/")
-        self.api_base_path = str(endpoint.get("api_base_path", "/index.php/apps/deck/api/v1.0") or "/index.php/apps/deck/api/v1.0")
-        self.board_id = int(endpoint.get("board_id", 0) or 0)
+        self.api_base_path = str(
+            endpoint.get("api_base_path", "/index.php/apps/deck/api/v1.0") or "/index.php/apps/deck/api/v1.0"
+        )
+        self.board_id = int(endpoint.get("board_id", 0) or 0)  # type: ignore[call-overload]
         if not self.base_url or self.board_id <= 0:
             raise ValueError("Endpoint Deck incomplet")
 
-    @with_retry(max_retries=3, base_delay=1.0, max_delay=15.0, retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError))
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=15.0,
+        retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError),
+    )  # type: ignore[misc, arg-type]
     def _request_json(self, method: str, path: str, payload: dict[str, object]) -> dict[str, object]:
         url = f"{self.base_url}{self.api_base_path}/boards/{self.board_id}{path}"
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -61,7 +68,7 @@ class NextcloudDeckClient:
 
     def create_card(self, *, stack_id: int, title: str, description: str, order: int = 999) -> dict[str, object]:
         # Nextcloud Deck cards are created under the target stack.
-        return self._request_json(
+        return self._request_json(  # type: ignore[misc]
             "POST",
             f"/stacks/{int(stack_id)}/cards",
             {"title": title, "description": description, "type": "plain", "order": int(order)},
@@ -131,7 +138,11 @@ def create_offer_card(
     if dry_run:
         return result
     endpoint_name = str(endpoint.get("name", "") or "")
-    existing = None if force else _existing_deck_card_event(conn, offer_id, endpoint_name=endpoint_name, stack_id=int(stack_id))
+    existing = (
+        None
+        if force
+        else _existing_deck_card_event(conn, offer_id, endpoint_name=endpoint_name, stack_id=int(stack_id))
+    )
     if existing is not None:
         card_id = existing.get("card_id")
         return DeckCardResult(
@@ -155,7 +166,7 @@ def create_offer_card(
         payload_json=json.dumps(
             {
                 "endpoint": endpoint_name,
-                "board_id": int(endpoint.get("board_id", 0) or 0),
+                "board_id": int(endpoint.get("board_id", 0) or 0),  # type: ignore[call-overload]
                 "stack_id": int(stack_id),
                 "card_id": normalized_card_id,
                 "title": title,

@@ -68,7 +68,7 @@ class EndpointRegistry:
         data = self._load_payload()
         default_name = str(data.get("default", "") or "")
         return [
-            self._normalize(name, raw, default_name=default_name)
+            self._normalize(name, raw, default_name=default_name)  # type: ignore[call-arg]
             for name, raw in sorted(data.get("endpoints", {}).items())
             if isinstance(raw, dict)
         ]
@@ -78,7 +78,7 @@ class EndpointRegistry:
         raw = data.get("endpoints", {}).get(name)
         if not isinstance(raw, dict):
             return None
-        return self._normalize(name, raw, default_name=str(data.get("default", "") or ""))
+        return self._normalize(name, raw, default_name=str(data.get("default", "") or ""))  # type: ignore[call-arg]
 
     def get_default(self) -> dict[str, Any] | None:
         data = self._load_payload()
@@ -101,4 +101,4 @@ class EndpointRegistry:
         endpoints[normalized_name] = endpoint
         default = normalized_name if make_default or not data.get("default") else str(data.get("default", "") or "")
         _write_json(self._file_func(), {"default": default, "endpoints": endpoints})
-        return self._normalize(normalized_name, endpoint, default_name=default)
+        return self._normalize(normalized_name, endpoint, default_name=default)  # type: ignore[call-arg]

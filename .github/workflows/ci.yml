@@ -7,6 +7,20 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[dev]" ruff
+      - name: Lint
+        run: ruff check emploi/ tests/
+      - name: Format check
+        run: ruff format --check emploi/ tests/
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -18,8 +32,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e ".[dev]" ruff
-      - name: Lint
-        run: ruff check emploi/ tests/
+        run: pip install -e ".[dev]"
       - name: Test
-        run: pytest tests/ -x -q --ignore=tests/test_cli_hellowork.py || pytest tests/ -x -q
+        run: pytest tests/ -x -q
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Type check
+        run: mypy emploi/ --ignore-missing-imports --exclude '/\.venv/' || true

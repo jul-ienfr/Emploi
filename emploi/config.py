@@ -14,6 +14,7 @@ from emploi.config_registry import EndpointRegistry, _load_json, _write_json
 
 # ── paths ──────────────────────────────────────────────────────────────
 
+
 def _emploi_config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "emploi"
 
@@ -42,8 +43,8 @@ def _nextcloud_tasks_endpoints_file() -> Path:
     return _emploi_config_dir() / "nextcloud_tasks.json"
 
 
-
 # ── accounts (profiles) ───────────────────────────────────────────────
+
 
 def _load_accounts() -> dict[str, str]:
     """Load profile mapping from accounts.json (or fallback config.json)."""
@@ -81,13 +82,11 @@ def list_accounts() -> list[dict[str, str]]:
     accounts = _load_accounts()
     data = _load_json(_accounts_file()) or _load_json(_config_file()) or {}
     default_key = data.get("default", "candidature")
-    return [
-        {"key": k, "profile": v, "default": "✓" if k == default_key else ""}
-        for k, v in accounts.items()
-    ]
+    return [{"key": k, "profile": v, "default": "✓" if k == default_key else ""} for k, v in accounts.items()]
 
 
 # ── document profiles (CV + cover letters) ─────────────────────────────
+
 
 def _empty_document_profiles_payload() -> dict[str, Any]:
     return {"default": "", "profiles": {}}
@@ -100,7 +99,6 @@ def _load_document_profiles_payload() -> dict[str, Any]:
         profiles = {}
     default = str(data.get("default", "") or "")
     return {"default": default, "profiles": profiles}
-
 
 
 def _expand_profile_path(path_value: str) -> str:
@@ -172,7 +170,11 @@ def set_document_profile(
     profiles = dict(data.get("profiles", {}))
     existing = profiles.get(normalized_name, {}) if isinstance(profiles.get(normalized_name), dict) else {}
     cv = _expand_profile_path(cv_path) if cv_path else str(existing.get("cv_path", "") or "")
-    letter = _expand_profile_path(cover_letter_path) if cover_letter_path else str(existing.get("cover_letter_path", "") or "")
+    letter = (
+        _expand_profile_path(cover_letter_path)
+        if cover_letter_path
+        else str(existing.get("cover_letter_path", "") or "")
+    )
     profile = {
         "cv_path": cv,
         "cover_letter_path": letter,
@@ -198,6 +200,7 @@ def set_default_document_profile(name: str) -> dict[str, Any]:
 
 
 # ── external kanban endpoints (Nextcloud Deck, etc.) ─────────────────────
+
 
 def _empty_kanban_endpoints_payload() -> dict[str, Any]:
     return {"default": "", "endpoints": {}}
@@ -286,6 +289,7 @@ def _normalize_kanban_endpoint(name: str, raw: dict[str, Any], *, default_name: 
         "default": "✓" if name == default_name else "",
     }
 
+
 def list_kanban_endpoints() -> list[dict[str, Any]]:
     return _kanban_registry.list()
 
@@ -337,6 +341,7 @@ def set_kanban_endpoint(
 
 
 # ── Nextcloud Files/WebDAV endpoints ─────────────────────────────────────
+
 
 def _empty_nextcloud_files_endpoints_payload() -> dict[str, Any]:
     return {"default": "", "endpoints": {}}
@@ -421,6 +426,7 @@ def set_nextcloud_files_endpoint(
 
 # ── Nextcloud Tasks/CalDAV endpoints ─────────────────────────────────────
 
+
 def _empty_nextcloud_tasks_endpoints_payload() -> dict[str, Any]:
     return {"default": "", "endpoints": {}}
 
@@ -460,9 +466,9 @@ def _normalize_nextcloud_tasks_endpoint(name: str, raw: dict[str, Any], *, defau
 
 # ── registry instances (must be after normalize functions) ─────────────
 
-_kanban_registry = EndpointRegistry(_kanban_endpoints_file, _normalize_kanban_endpoint)
-_nextcloud_files_registry = EndpointRegistry(_nextcloud_files_endpoints_file, _normalize_nextcloud_files_endpoint)
-_nextcloud_tasks_registry = EndpointRegistry(_nextcloud_tasks_endpoints_file, _normalize_nextcloud_tasks_endpoint)
+_kanban_registry = EndpointRegistry(_kanban_endpoints_file, _normalize_kanban_endpoint)  # type: ignore[arg-type]
+_nextcloud_files_registry = EndpointRegistry(_nextcloud_files_endpoints_file, _normalize_nextcloud_files_endpoint)  # type: ignore[arg-type]
+_nextcloud_tasks_registry = EndpointRegistry(_nextcloud_tasks_endpoints_file, _normalize_nextcloud_tasks_endpoint)  # type: ignore[arg-type]
 
 
 def list_nextcloud_tasks_endpoints() -> list[dict[str, Any]]:

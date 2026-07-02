@@ -20,6 +20,7 @@ from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
 from emploi.db import connect, init_db, list_saved_searches
 from emploi.france_travail.flows import run_saved_search
 from emploi.logging import get_logger
+from emploi.monitoring import report_cycle_result, send_alert
 
 logger = get_logger("daemon")
 
@@ -34,22 +35,24 @@ def _print(msg: str) -> None:
     print(f"[{_now_iso()}] {msg}", flush=True)
 
 
-def _run_all_profiles(conn: Connection, site: str, profile: str) -> None:
+def _run_all_profiles(conn: Connection, site: str, profile: str) -> tuple[int, int, int, list[str]]:
     profiles = list_saved_searches(conn, enabled=True)
     if not profiles:
         _print("Aucun profil actif — rien à exécuter")
         logger.info("Aucun profil actif")
-        return
+        return 0, 0, 0, []
 
     total = 0
     created = 0
     updated = 0
+    errors: list[str] = []
     for saved in profiles:
         try:
             results = run_saved_search(conn, int(saved["id"]), site=site, profile=profile)
         except Exception as exc:
             _print(f"ERREUR {saved['name']}: {exc}")
             logger.error("Erreur profil %s: %s", saved["name"], exc, exc_info=True)
+            errors.append(f"{saved['name']}: {exc}")
             continue
         total += len(results)
         created += sum(1 for r in results if r.created)
@@ -58,7 +61,8 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> None:
         logger.info("Profil %s: %d offre(s)", saved["name"], len(results))
 
     _print(f"Total: {total} offre(s) — créée(s): {created} — mise(s) à jour: {updated}")
-    logger.info("Cycle terminé: total=%d created=%d updated=%d", total, created, updated)
+    logger.info("Cycle terminé: total=%d created=%d updated=%d errors=%d", total, created, updated, len(errors))
+    return total, created, updated, errors
 
 
 def watch_loop(
@@ -95,13 +99,25 @@ def watch_loop(
     while not shutdown:
         _print("--- Cycle ---")
         logger.debug("Cycle démarré")
+        import time as _time
+
+        cycle_start = _time.monotonic()
         try:
             with connect() as conn:
                 init_db(conn)
-                _run_all_profiles(conn, site=site, profile=profile)
+                total, created, updated, errors = _run_all_profiles(conn, site=site, profile=profile)
+                duration = _time.monotonic() - cycle_start
+                report_cycle_result(
+                    total_offers=total,
+                    created=created,
+                    updated=updated,
+                    errors=errors,
+                    duration_seconds=duration,
+                )
         except Exception as exc:
             _print(f"ERREUR cycle: {exc}")
             logger.error("Erreur cycle: %s", exc, exc_info=True)
+            send_alert(title="Daemon cycle crash", details=str(exc))
 
         if shutdown or once:
             break

@@ -55,7 +55,9 @@ def application_draft(
 @application_app.command("export")
 def application_export(
     offer_id: int,
-    to_nextcloud: bool = typer.Option(False, "--to-nextcloud", help="Exporter le dossier candidature vers Nextcloud Files/WebDAV"),
+    to_nextcloud: bool = typer.Option(
+        False, "--to-nextcloud", help="Exporter le dossier candidature vers Nextcloud Files/WebDAV"
+    ),
     endpoint_name: str = typer.Option("", "--endpoint", help="Endpoint nextcloud-files; vide = défaut"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans upload ni événement"),
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire local des brouillons"),
@@ -110,13 +112,29 @@ def application_pipeline(
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire local des brouillons"),
     include_documents: bool = typer.Option(False, "--include-documents", help="Ajouter CV/LM du profil documents"),
     document_profile_name: str = typer.Option("", "--document-profile", help="Profil documents; vide = défaut"),
-    force_card: bool = typer.Option(False, "--force-card", help="Créer une nouvelle carte même si un événement existe déjà"),
-    mark_sent: bool = typer.Option(False, "--mark-sent", help="Enregistrer une candidature envoyée locale avant relance"),
-    schedule_followup: bool | None = typer.Option(None, "--schedule-followup/--no-schedule-followup", help="Planifier une relance selon la config ou désactiver pour ce run"),
-    followup_after: str = typer.Option("", "--followup-after", help="Délai de relance pour ce run, ex: 7d; vide = config"),
-    sync_followup_task: bool | None = typer.Option(None, "--sync-followup-task/--no-sync-followup-task", help="Créer la tâche Nextcloud de relance selon config ou choix du run"),
+    force_card: bool = typer.Option(
+        False, "--force-card", help="Créer une nouvelle carte même si un événement existe déjà"
+    ),
+    mark_sent: bool = typer.Option(
+        False, "--mark-sent", help="Enregistrer une candidature envoyée locale avant relance"
+    ),
+    schedule_followup: bool | None = typer.Option(
+        None,
+        "--schedule-followup/--no-schedule-followup",
+        help="Planifier une relance selon la config ou désactiver pour ce run",
+    ),
+    followup_after: str = typer.Option(
+        "", "--followup-after", help="Délai de relance pour ce run, ex: 7d; vide = config"
+    ),
+    sync_followup_task: bool | None = typer.Option(
+        None,
+        "--sync-followup-task/--no-sync-followup-task",
+        help="Créer la tâche Nextcloud de relance selon config ou choix du run",
+    ),
     tasks_endpoint_name: str = typer.Option("", "--tasks-endpoint", help="Endpoint nextcloud-tasks; vide = défaut"),
-    force_followup_task: bool = typer.Option(False, "--force-followup-task", help="Recréer la tâche de relance même si un événement existe"),
+    force_followup_task: bool = typer.Option(
+        False, "--force-followup-task", help="Recréer la tâche de relance même si un événement existe"
+    ),
     today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
 ) -> None:
     """Exporte le dossier candidature puis prépare/crée la carte Deck liée."""
@@ -141,7 +159,9 @@ def application_pipeline(
         with connect() as conn:
             init_db(conn)
             auto_followup = get_auto_followup_config(conn)
-            should_schedule_followup = bool(auto_followup["enabled"]) if schedule_followup is None else schedule_followup
+            should_schedule_followup = (
+                bool(auto_followup["enabled"]) if schedule_followup is None else schedule_followup
+            )
             followup_date = ""
             followup_task_result = None
             followup_requires_sent = False
@@ -150,7 +170,9 @@ def application_pipeline(
             tasks_endpoint = None
             existing_sent = None
             if should_schedule_followup:
-                delay_days = normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
+                delay_days = (
+                    normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
+                )  # type: ignore[call-overload]
                 followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
                 if not dry_run:
                     existing_sent = conn.execute(
@@ -158,7 +180,9 @@ def application_pipeline(
                         (offer_id,),
                     ).fetchone()
                 sync_config = get_followup_sync_config(conn)
-                should_sync_followup_task = bool(sync_config["enabled"]) if sync_followup_task is None else sync_followup_task
+                should_sync_followup_task = (
+                    bool(sync_config["enabled"]) if sync_followup_task is None else sync_followup_task
+                )
                 if should_sync_followup_task and (dry_run or existing_sent is not None or mark_sent):
                     tasks_endpoint = (
                         emploi_config.get_nextcloud_tasks_endpoint(tasks_endpoint_name)
@@ -166,7 +190,9 @@ def application_pipeline(
                         else emploi_config.get_default_nextcloud_tasks_endpoint()
                     )
                     if tasks_endpoint is None:
-                        raise ValueError("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
+                        raise ValueError(
+                            "Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`."
+                        )
             export_result = export_application_to_nextcloud(
                 conn,
                 offer_id,
@@ -191,7 +217,11 @@ def application_pipeline(
                         "SELECT id FROM applications WHERE offer_id = ? AND status IN ('sent', 'followup') ORDER BY id DESC LIMIT 1",
                         (offer_id,),
                     ).fetchone()
-                application_id = int(existing_sent["id"]) if existing_sent is not None else add_application(conn, offer_id, status="sent")
+                application_id = (
+                    int(existing_sent["id"])
+                    if existing_sent is not None
+                    else add_application(conn, offer_id, status="sent")
+                )
                 update_offer_status(conn, offer_id, "sent")
             if should_schedule_followup:
                 if not dry_run:
@@ -204,12 +234,12 @@ def application_pipeline(
                         followup_requires_sent = True
                 if should_sync_followup_task and (dry_run or application_id is not None):
                     if dry_run:
-                        followup_task_result = "dry-run"
+                        followup_task_result = None  # dry-run: no actual task created
                     else:
-                        followup_task_result = create_followup_task(
+                        followup_task_result = create_followup_task(  # type: ignore[assignment]
                             conn,
-                            application_id=application_id,
-                            endpoint=tasks_endpoint,
+                            application_id=application_id,  # type: ignore[arg-type]
+                            endpoint=tasks_endpoint,  # type: ignore[arg-type]
                             dry_run=False,
                             force=force_followup_task,
                         )
@@ -233,11 +263,11 @@ def application_pipeline(
         if followup_task_result == "dry-run":
             console.print("Tâche Nextcloud : préparée (dry-run)")
         elif followup_task_result is not None:
-            console.print(f"Tâche Nextcloud : {followup_task_result.summary}")
-            if followup_task_result.reused_existing:
+            console.print(f"Tâche Nextcloud : {followup_task_result.summary}")  # type: ignore[attr-defined]
+            if followup_task_result.reused_existing:  # type: ignore[attr-defined]
                 console.print("Tâche déjà enregistrée : aucune nouvelle tâche créée.")
-            elif followup_task_result.href:
-                console.print(f"Tâche href : {followup_task_result.href}")
+            elif followup_task_result.href:  # type: ignore[attr-defined]
+                console.print(f"Tâche href : {followup_task_result.href}")  # type: ignore[attr-defined]
     elif followup_requires_sent:
         console.print("Relance : non planifiée (aucune candidature envoyée locale; utilise --mark-sent)")
     elif schedule_followup is False:
@@ -252,6 +282,7 @@ def application_pipeline(
 def application_status(application_id: int, status: str) -> None:
     """Change le statut d'une candidature dans le pipeline."""
     from emploi.cli import _application_status_update
+
     _application_status_update(application_id, status)
 
 
@@ -259,6 +290,7 @@ def application_status(application_id: int, status: str) -> None:
 def application_update(application_id: int, status: str) -> None:
     """Alias sûr pour changer le statut d'une candidature."""
     from emploi.cli import _application_status_update
+
     _application_status_update(application_id, status)
 
 
@@ -287,16 +319,26 @@ def application_followup_sync(
     today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
 ) -> None:
     """Synchronise une relance ou les relances dues vers Nextcloud Tasks."""
-    endpoint = emploi_config.get_nextcloud_tasks_endpoint(endpoint_name) if endpoint_name else emploi_config.get_default_nextcloud_tasks_endpoint()
+    endpoint = (
+        emploi_config.get_nextcloud_tasks_endpoint(endpoint_name)
+        if endpoint_name
+        else emploi_config.get_default_nextcloud_tasks_endpoint()
+    )
     if endpoint is None:
         raise typer.BadParameter("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
     try:
         with connect() as conn:
             init_db(conn)
             if application_id:
-                results = [create_followup_task(conn, application_id=application_id, endpoint=endpoint, dry_run=dry_run, force=force)]
+                results = [
+                    create_followup_task(
+                        conn, application_id=application_id, endpoint=endpoint, dry_run=dry_run, force=force
+                    )
+                ]
             else:
-                results = sync_due_followup_tasks(conn, endpoint=endpoint, today=_parse_today(today).isoformat(), dry_run=dry_run, force=force)
+                results = sync_due_followup_tasks(
+                    conn, endpoint=endpoint, today=_parse_today(today).isoformat(), dry_run=dry_run, force=force
+                )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     if not results:
@@ -304,7 +346,9 @@ def application_followup_sync(
         return
     for result in results:
         verb = "préparée" if dry_run else ("déjà enregistrée" if result.reused_existing else "créée")
-        console.print(f"Tâche Nextcloud {verb} : candidature #{result.application_id} — {result.summary} — échéance {result.due_date}")
+        console.print(
+            f"Tâche Nextcloud {verb} : candidature #{result.application_id} — {result.summary} — échéance {result.due_date}"
+        )
         if result.href:
             console.print(f"Href : {result.href}")
 
@@ -375,7 +419,9 @@ def application_followup_schedule_alias(
 
 
 @application_app.command("due")
-def application_due(today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu")) -> None:
+def application_due(
+    today: str | None = typer.Option(None, "--today", help="Date ISO YYYY-MM-DD pour tests/rejeu"),
+) -> None:
     """Liste les relances arrivées à échéance."""
     day = _parse_today(today).isoformat()
     with connect() as conn:
@@ -387,7 +433,7 @@ def application_due(today: str | None = typer.Option(None, "--today", help="Date
         return
     table = Table("Offre", "Titre", "Entreprise", "Échéance")
     for row in due:
-        table.add_row(str(row["offer_id"]), row["title"], row["company"], row.get("due_date", ""))
+        table.add_row(str(row["offer_id"]), row["title"], row["company"], row.get("due_date", ""))  # type: ignore[arg-type]
     console.print(table)
 
 

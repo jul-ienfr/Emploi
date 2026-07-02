@@ -42,7 +42,9 @@ class NextcloudTasksClient:
         self.username = username or _pass_show(str(endpoint.get("username_pass", "") or ""))
         self.password = password or _pass_show(str(endpoint.get("password_pass", "") or ""))
         self.base_url = str(endpoint.get("base_url", "") or "").rstrip("/")
-        self.caldav_base_path = str(endpoint.get("caldav_base_path", "/remote.php/dav/calendars") or "/remote.php/dav/calendars")
+        self.caldav_base_path = str(
+            endpoint.get("caldav_base_path", "/remote.php/dav/calendars") or "/remote.php/dav/calendars"
+        )
         self.calendar = str(endpoint.get("calendar", "tasks") or "tasks").strip("/") or "tasks"
         if not self.base_url or not self.username or not self.password:
             raise ValueError("Endpoint Nextcloud Tasks incomplet")
@@ -53,8 +55,15 @@ class NextcloudTasksClient:
         encoded_calendar = urllib.parse.quote(self.calendar, safe="")
         return f"{self.base_url}{self.caldav_base_path}/{encoded_user}/{encoded_calendar}"
 
-    @with_retry(max_retries=3, base_delay=1.0, max_delay=15.0, retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError))
-    def _request(self, method: str, url: str, data: bytes = b"", content_type: str = "text/calendar; charset=utf-8") -> bytes:
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=15.0,
+        retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError),
+    )  # type: ignore[misc, arg-type]
+    def _request(
+        self, method: str, url: str, data: bytes = b"", content_type: str = "text/calendar; charset=utf-8"
+    ) -> bytes:
         request = urllib.request.Request(url, data=data if data else None, method=method)
         if data:
             request.add_header("Content-Type", content_type)
@@ -71,7 +80,7 @@ class NextcloudTasksClient:
     def create_task(self, *, uid: str, summary: str, description: str, due_date: str) -> dict[str, object]:
         href = f"{self.calendar_url}/{urllib.parse.quote(uid, safe='')}.ics"
         ics = build_vtodo(uid=uid, summary=summary, description=description, due_date=due_date)
-        self._request("PUT", href, ics.encode("utf-8"))
+        self._request("PUT", href, ics.encode("utf-8"))  # type: ignore[misc]
         return {"uid": uid, "href": href}
 
 
@@ -184,12 +193,16 @@ def create_followup_task(
     uid = _followup_uid(endpoint_name, int(application_id), due_date)
     summary = f"Relancer — {compose_deck_card_title(offer)}"
     description = compose_followup_task_description(offer, application)
-    existing = None if force else _existing_followup_task_event(
-        conn,
-        offer_id,
-        application_id=int(application_id),
-        endpoint_name=endpoint_name,
-        due_date=due_date,
+    existing = (
+        None
+        if force
+        else _existing_followup_task_event(
+            conn,
+            offer_id,
+            application_id=int(application_id),
+            endpoint_name=endpoint_name,
+            due_date=due_date,
+        )
     )
     if existing is not None:
         return FollowupTaskResult(
@@ -260,7 +273,7 @@ def sync_due_followup_tasks(
     for action in list_next_actions(conn, today=current):
         if action.get("action") != "Relancer candidature":
             continue
-        application_id = int(action["application_id"])
+        application_id = int(action["application_id"])  # type: ignore[call-overload]
         results.append(
             create_followup_task(
                 conn,

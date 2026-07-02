@@ -227,7 +227,7 @@ def search_profile_run(
                 return
             if name_or_id is None:
                 raise typer.BadParameter("Indique un nom/ID ou --all")
-            saved = get_saved_search(conn, name_or_id)
+            saved = get_saved_search(conn, name_or_id)  # type: ignore[assignment]
             if saved is None:
                 raise typer.BadParameter(f"Profil de recherche introuvable: {name_or_id}")
             source = str(saved["source"]) if "source" in saved.keys() else "all"
@@ -261,7 +261,13 @@ def search_profile_run(
     console.print(f"créée(s): {created} — mise(s) à jour: {updated}")
     table = Table("ID", "Action", "Score", "Titre", "URL")
     for result in results:
-        table.add_row(str(result.offer_id), "créée" if result.created else "mise à jour", str(result.score), result.title, result.browser_url)
+        table.add_row(
+            str(result.offer_id),
+            "créée" if result.created else "mise à jour",
+            str(result.score),
+            result.title,
+            result.browser_url,
+        )
     console.print(table)
 
 
