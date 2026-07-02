@@ -9,7 +9,7 @@ from emploi.cli import app, console
 
 @app.command()
 def dashboard(
-    host: str = typer.Option("127.0.0.1", "--host", help="Adresse de bind"),
+    host: str = typer.Option("0.0.0.0", "--host", help="Adresse de bind"),
     port: int = typer.Option(8050, "--port", "-p", help="Port du serveur"),
 ) -> None:
     """Lance le dashboard web pour visualiser les offres.
@@ -26,5 +26,7 @@ def dashboard(
         raise typer.Exit(1)
 
     console.print(f"[green]Dashboard: http://{host}:{port}[/green]")
+    if host == "0.0.0.0":
+        console.print(f"[dim]Accessible depuis le réseau: http://<ip-machine>:{port}[/dim]")
     console.print("Ctrl+C pour arrêter")
     run_dashboard(host=host, port=port)
