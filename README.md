@@ -8,6 +8,17 @@ CLI Python personnel pour chercher, scorer et suivre les offres d'emploi.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
+pip install ruff mypy pre-commit  # optionnel
+pre-commit install                # active les hooks ruff avant chaque commit
+```
+
+Commandes utiles :
+
+```bash
+make test          # lance les tests
+make lint          # vérifie le code avec ruff
+make format        # formate + auto-fix
+make check         # lint + test
 ```
 
 ## Architecture V1 — France Travail via Managed Browser
@@ -15,6 +26,48 @@ pip install -e '.[dev]'
 `emploi` conserve les données, le scoring, les brouillons et le reporting en local dans SQLite. L'intégration France Travail passe en priorité par un **Managed Browser** externe : la CLI `emploi` orchestre des commandes navigateur (`status`, `open`, `snapshot`, `checkpoint`), extrait les offres depuis les snapshots retournés, puis les stocke localement avec leurs métadonnées France Travail.
 
 Cette séparation évite de coupler le cœur local à un scraper direct : le navigateur managé garde la session utilisateur, ouvre les pages France Travail et renvoie des payloads JSON/HTML/texte exploitables par `emploi`.
+
+## Structure du code
+
+```
+emploi/
+├── cli/                    # CLI Typer, découpée par groupe de commandes
+│   ├── __init__.py         # App, helpers partagés, callback main
+│   ├── offer.py            # offer add/list/show/score/status/reject/archive
+│   ├── application.py      # application draft/list/status/export/pipeline/followup
+│   ├── browser.py          # browser status/open/snapshot/checkpoint/smoke
+│   ├── ft.py               # ft search/refresh/apply/smoke
+│   ├── hellowork.py        # hellowork apply/search
+│   ├── search_profile.py   # search-profile add/list/enable/disable/run/watch
+│   ├── auto_apply.py       # auto-apply run
+│   ├── import_.py          # import offers
+│   ├── option.py           # option list/get/enable/disable/toggle
+│   ├── document_profile.py # document-profile set/default/list/status
+│   ├── kanban.py           # kanban set/show/list + card add-offer
+│   ├── nextcloud.py        # nextcloud-files + nextcloud-tasks set/show/list
+│   ├── doctor.py           # doctor
+│   └── report.py           # report/brief/next/apply
+├── france_travail/         # Intégration France Travail (browser-mediated)
+├── browser/                # Client HTTP Managed Browser
+├── db.py                   # SQLite data layer
+├── config.py               # Configuration (~/.config/emploi/*.json)
+├── config_registry.py      # Registry générique pour endpoints JSON
+├── retry.py                # Retry avec backoff exponentiel
+├── logging.py              # Logging structuré (RotatingFileHandler)
+├── utils.py                # Utilitaires partagés (_pass_show, _safe_slug, etc.)
+├── scoring.py              # Moteur de scoring des offres
+├── applications.py         # Création de brouillons de candidature
+├── hellowork.py            # Flux apply HelloWork
+├── hellowork_search.py     # Recherche HelloWork (HTTP scraping)
+├── auto_apply.py           # Sélection/candidature automatique bornée
+├── daemon.py               # Boucle de veille automatique
+├── brief.py                # Brief quotidien
+├── doctor.py               # Diagnostic de santé
+├── importers.py            # Import multi-sources (JSON/CSV)
+├── nextcloud_deck.py       # Client Nextcloud Deck
+├── nextcloud_files.py      # Client Nextcloud WebDAV
+└── nextcloud_tasks.py      # Client Nextcloud CalDAV
+```
 
 ## Configuration
 
@@ -181,3 +234,6 @@ Elle décrit le workflow agent pour utiliser `emploi` correctement : diagnostic 
 
 - `emploi ft apply` ne soumet jamais automatiquement une candidature : il vérifie, prépare un brouillon local ou ouvre l'offre dans le navigateur managé.
 - Les offres France Travail importées gardent l'URL navigateur, l'état actif/inactif, le dernier snapshot brut et les événements d'audit locaux.
+- Retry automatique sur erreurs transitoires (Managed Browser, Nextcloud) via `retry.py`.
+- Logging structuré vers `~/.local/share/emploi/emploi.log` (flag `--verbose` pour debug).
+- Linting automatique via pre-commit (ruff) et CI GitHub Actions.
