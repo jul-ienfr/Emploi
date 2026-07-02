@@ -1,181 +1,174 @@
 """Lightweight web dashboard for Emploi CLI — view offers, stats, and filters.
 
 Usage:
-    emploi dashboard              # starts on http://localhost:8050
+    emploi dashboard              # starts on http://0.0.0.0:8050
     emploi dashboard --port 9000   # custom port
-    emploi dashboard --host 0.0.0.0 # accessible from network
+    emploi dashboard --host 127.0.0.1 # localhost only
 
 Requires Flask: pip install flask
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import time
 
 from emploi.logging import get_logger
 
 logger = get_logger("dashboard")
 
+_start_time = time.monotonic()
+_SOURCE_CACHE: list[str] | None = None
+_SOURCE_CACHE_TS: float = 0
+
 
 def _get_db() -> sqlite3.Connection:
     from emploi.db import connect
 
-    return connect()
+    conn = connect()
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def _get_sources(conn: sqlite3.Connection) -> list[str]:
+    global _SOURCE_CACHE, _SOURCE_CACHE_TS
+    now = time.monotonic()
+    if _SOURCE_CACHE is not None and now - _SOURCE_CACHE_TS < 300:
+        return _SOURCE_CACHE
+    _SOURCE_CACHE = [
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT COALESCE(NULLIF(external_source,''), source) FROM offers "
+            "WHERE COALESCE(NULLIF(external_source,''), source) != '' ORDER BY 1"
+        ).fetchall()
+    ]
+    _SOURCE_CACHE_TS = now
+    return _SOURCE_CACHE
 
 
 def create_app() -> object:
     try:
-        from flask import Flask, jsonify, render_template_string, request
+        from flask import Flask, jsonify, render_template, request
     except ImportError:
         raise ImportError("Flask requis pour le dashboard. Installe-le avec: pip install flask")
 
-    app = Flask(__name__)
+    _basedir = os.path.dirname(os.path.abspath(__file__))
+    app = Flask(
+        __name__,
+        template_folder=os.path.join(_basedir, "dashboard", "templates"),
+        static_folder=os.path.join(_basedir, "dashboard", "static"),
+    )
 
-    INDEX_HTML = """
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Emploi Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
-        .header { background: #1a1a2e; color: white; padding: 1.5rem 2rem; }
-        .header h1 { font-size: 1.5rem; }
-        .header .stats { display: flex; gap: 2rem; margin-top: 0.5rem; font-size: 0.9rem; opacity: 0.8; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
-        .filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
-        .filters input, .filters select { padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; }
-        .filters input { flex: 1; min-width: 200px; }
-        .filters button { padding: 0.5rem 1.5rem; background: #1a1a2e; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
-        .filters button:hover { background: #16213e; }
-        .offer-grid { display: grid; gap: 1rem; }
-        .offer-card { background: white; border-radius: 8px; padding: 1.2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #1a1a2e; }
-        .offer-card[data-score="high"] { border-left-color: #27ae60; }
-        .offer-card[data-score="mid"] { border-left-color: #f39c12; }
-        .offer-card[data-score="low"] { border-left-color: #e74c3c; }
-        .offer-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.3rem; }
-        .offer-title a { color: #1a1a2e; text-decoration: none; }
-        .offer-title a:hover { text-decoration: underline; }
-        .offer-meta { font-size: 0.85rem; color: #666; display: flex; gap: 1rem; flex-wrap: wrap; }
-        .offer-meta span { display: inline-flex; align-items: center; gap: 0.3rem; }
-        .offer-desc { font-size: 0.85rem; color: #555; margin-top: 0.5rem; line-height: 1.4; }
-        .source-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
-        .source-fr { background: #dbeafe; color: #1e40af; }
-        .source-ch { background: #fef3c7; color: #92400e; }
-        .score-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
-        .score-high { background: #d1fae5; color: #065f46; }
-        .score-mid { background: #fef3c7; color: #92400e; }
-        .score-low { background: #fee2e2; color: #991b1b; }
-        .pagination { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1.5rem; }
-        .pagination a, .pagination span { padding: 0.4rem 0.8rem; border-radius: 4px; text-decoration: none; font-size: 0.85rem; }
-        .pagination a { background: white; color: #333; border: 1px solid #ddd; }
-        .pagination a:hover { background: #f0f0f0; }
-        .pagination .active { background: #1a1a2e; color: white; border-color: #1a1a2e; }
-        .empty { text-align: center; padding: 3rem; color: #999; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>📋 Emploi Dashboard</h1>
-        <div class="stats">
-            <span id="stat-total">Chargement...</span>
-        </div>
-    </div>
-    <div class="container">
-        <form class="filters" method="GET">
-            <input type="text" name="q" placeholder="Rechercher..." value="{{ q }}">
-            <select name="source">
-                <option value="">Toutes les sources</option>
-                {% for s in sources %}
-                <option value="{{ s }}" {{ 'selected' if s == selected_source }}>{{ s }}</option>
-                {% endfor %}
-            </select>
-            <select name="status">
-                <option value="">Tous les statuts</option>
-                <option value="new" {{ 'selected' if status == 'new' }}>Nouveau</option>
-                <option value="interesting" {{ 'selected' if status == 'interesting' }}>Intéressant</option>
-                <option value="applied" {{ 'selected' if status == 'applied' }}>Postulé</option>
-            </select>
-            <button type="submit">Filtrer</button>
-        </form>
+    # ── Security headers ────────────────────────────────────────────────
 
-        <div class="offer-grid">
-            {% if offers %}
-            {% for offer in offers %}
-            <div class="offer-card" data-score="{{ 'high' if offer.score >= 70 else ('mid' if offer.score >= 50 else 'low') }}">
-                <div class="offer-title">
-                    {% if offer.url %}<a href="{{ offer.url }}" target="_blank">{{ offer.title }}</a>
-                    {% else %}{{ offer.title }}{% endif %}
-                </div>
-                <div class="offer-meta">
-                    {% if offer.company %}<span>🏢 {{ offer.company }}</span>{% endif %}
-                    {% if offer.location %}<span>📍 {{ offer.location }}</span>{% endif %}
-                    {% if offer.contract_type %}<span>📄 {{ offer.contract_type }}</span>{% endif %}
-                    {% if offer.salary %}<span>💰 {{ offer.salary }}</span>{% endif %}
-                    <span class="source-badge {{ 'source-ch' if offer.external_source in ['okjob','jobup','jobs.ch','comparis'] else 'source-fr' }}">{{ offer.external_source or offer.source }}</span>
-                    <span class="score-badge {{ 'score-high' if offer.score >= 70 else ('score-mid' if offer.score >= 50 else 'score-low') }}">{{ offer.score }}/100</span>
-                </div>
-                {% if offer.description %}
-                <div class="offer-desc">{{ offer.description[:200] }}{% if offer.description|length > 200 %}...{% endif %}</div>
-                {% endif %}
-            </div>
-            {% endfor %}
-            </div>
+    @app.after_request
+    def _set_security_headers(response):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:;"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        return response
 
-            {% if total_pages > 1 %}
-            <div class="pagination">
-                {% if page > 1 %}<a href="?{{ params }}&page={{ page-1 }}">← Précédent</a>{% endif %}
-                {% for p in range(1, total_pages+1) %}
-                {% if p == page %}<span class="active">{{ p }}</span>
-                {% else %}<a href="?{{ params }}&page={{ p }}">{{ p }}</a>{% endif %}
-                {% endfor %}
-                {% if page < total_pages %}<a href="?{{ params }}&page={{ page+1 }}">Suivant →</a>{% endif %}
-            </div>
-            {% endif %}
+    # ── Request timing middleware ────────────────────────────────────────
 
-            {% else %}
-            <div class="empty">
-                <p>Aucune offre trouvée.</p>
-                <p style="margin-top:0.5rem;font-size:0.85rem">Lance <code>emploi search-all "python"</code> pour remplir la base.</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-    <script>
-        fetch('/api/stats').then(r=>r.json()).then(d=>{
-            document.getElementById('stat-total').textContent = d.total + ' offres';
-        });
-    </script>
-</body>
-</html>
-"""
+    @app.before_request
+    def _start_timer():
+        request._start_time = time.monotonic()  # type: ignore[attr-defined]
+
+    @app.after_request
+    def _log_slow(response):
+        if hasattr(request, "_start_time"):
+            elapsed = (time.monotonic() - request._start_time) * 1000
+            if elapsed > 500:
+                logger.warning("Slow request: %s %s (%.0fms)", request.method, request.path, elapsed)
+            response.headers["X-Response-Time"] = f"{elapsed:.0f}ms"
+        return response
+
+    # ── Error handlers ──────────────────────────────────────────────────
+
+    @app.errorhandler(404)
+    def not_found(e):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Not found"}), 404
+        return render_template("error.html", code=404, message="Page introuvable"), 404
+
+    @app.errorhandler(500)
+    def server_error(e):
+        logger.error("Internal error: %s", e)
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Internal server error"}), 500
+        return render_template("error.html", code=500, message="Erreur interne"), 500
+
+    # ── Health check ────────────────────────────────────────────────────
+
+    @app.route("/health")
+    def health():
+        try:
+            conn = _get_db()
+            conn.execute("SELECT 1")
+            conn.close()
+            db_ok = True
+        except Exception:
+            db_ok = False
+        uptime = time.monotonic() - _start_time
+        from emploi import __version__
+
+        return jsonify(
+            {
+                "status": "ok" if db_ok else "degraded",
+                "db": "ok" if db_ok else "error",
+                "version": __version__,
+                "uptime_seconds": round(uptime, 1),
+            }
+        )
+
+    # ── Main index ──────────────────────────────────────────────────────
 
     @app.route("/")
     def index():
         q = request.args.get("q", "").strip()
         source_filter = request.args.get("source", "").strip()
         status = request.args.get("status", "").strip()
+        sort = request.args.get("sort", "score").strip()
+        min_score = request.args.get("min_score", "").strip()
+        max_score = request.args.get("max_score", "").strip()
         page = max(1, int(request.args.get("page", 1)))
-        per_page = 30
+        per_page = int(os.environ.get("EMPLOI_DASHBOARD_PER_PAGE", "30"))
 
         conn = _get_db()
         try:
-            # Build query
-            where = []
+            where = ["is_active = 1"]
             params: list = []
+
             if q:
                 where.append("(title LIKE ? OR company LIKE ? OR description LIKE ?)")
                 params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
             if source_filter:
                 where.append("(external_source = ? OR source = ?)")
-                params.extend([f"%{source_filter}%", f"%{source_filter}%"])
+                params.extend([source_filter, source_filter])
             if status:
                 where.append("status = ?")
                 params.append(status)
+            if min_score:
+                where.append("score >= ?")
+                params.append(int(min_score))
+            if max_score:
+                where.append("score <= ?")
+                params.append(int(max_score))
 
-            where_clause = "WHERE " + " AND ".join(where) if where else ""
+            where_clause = "WHERE " + " AND ".join(where)
+
+            # Sort
+            sort_map = {
+                "score": "score DESC, id DESC",
+                "date": "created_at DESC, id DESC",
+                "company": "company ASC, score DESC",
+                "location": "location ASC, score DESC",
+                "title": "title ASC",
+            }
+            order = sort_map.get(sort, "score DESC, id DESC")
 
             # Count
             count_row = conn.execute(f"SELECT COUNT(*) FROM offers {where_clause}", params).fetchone()
@@ -185,19 +178,13 @@ def create_app() -> object:
             # Fetch page
             offset = (page - 1) * per_page
             offers = conn.execute(
-                f"SELECT * FROM offers {where_clause} ORDER BY score DESC, id DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM offers {where_clause} ORDER BY {order} LIMIT ? OFFSET ?",
                 params + [per_page, offset],
             ).fetchall()
 
-            # Get distinct sources for filter
-            sources = [
-                row[0]
-                for row in conn.execute(
-                    "SELECT DISTINCT COALESCE(NULLIF(external_source,''), source) FROM offers WHERE COALESCE(NULLIF(external_source,''), source) != '' ORDER BY 1"
-                ).fetchall()
-            ]
+            sources = _get_sources(conn)
 
-            # Build params string for pagination links
+            # Build params string for pagination
             param_parts = []
             if q:
                 param_parts.append(f"q={q}")
@@ -205,33 +192,54 @@ def create_app() -> object:
                 param_parts.append(f"source={source_filter}")
             if status:
                 param_parts.append(f"status={status}")
+            if sort != "score":
+                param_parts.append(f"sort={sort}")
+            if min_score:
+                param_parts.append(f"min_score={min_score}")
+            if max_score:
+                param_parts.append(f"max_score={max_score}")
             params_str = "&".join(param_parts)
 
-            return render_template_string(
-                INDEX_HTML,
+            # Use application_summary for header stats
+            from emploi.db import application_summary
+
+            stats = application_summary(conn)
+
+            return render_template(
+                "index.html",
                 offers=offers,
                 sources=sources,
                 q=q,
                 selected_source=source_filter,
                 status=status,
+                sort=sort,
+                min_score=min_score,
+                max_score=max_score,
                 page=page,
                 total_pages=total_pages,
+                total=total,
                 params=params_str,
+                stats=stats,
             )
         finally:
             conn.close()
+
+    # ── API routes ──────────────────────────────────────────────────────
 
     @app.route("/api/stats")
     def api_stats():
         conn = _get_db()
         try:
-            total = conn.execute("SELECT COUNT(*) FROM offers").fetchone()[0]
+            from emploi.db import application_summary
+
+            stats = application_summary(conn)
             by_source = dict(
                 conn.execute(
-                    "SELECT COALESCE(NULLIF(external_source,''), source), COUNT(*) FROM offers GROUP BY 1"
+                    "SELECT COALESCE(NULLIF(external_source,''), source), COUNT(*) "
+                    "FROM offers WHERE is_active = 1 GROUP BY 1"
                 ).fetchall()
             )
-            return jsonify({"total": total, "by_source": by_source})
+            return jsonify({**stats, "by_source": by_source})
         finally:
             conn.close()
 
@@ -240,15 +248,51 @@ def create_app() -> object:
         conn = _get_db()
         try:
             limit = min(int(request.args.get("limit", 50)), 200)
-            offers = conn.execute("SELECT * FROM offers ORDER BY score DESC, id DESC LIMIT ?", (limit,)).fetchall()
+            offers = conn.execute(
+                "SELECT * FROM offers WHERE is_active = 1 ORDER BY score DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
             return jsonify([dict(row) for row in offers])
+        finally:
+            conn.close()
+
+    @app.route("/api/applications")
+    def api_applications():
+        conn = _get_db()
+        try:
+            from emploi.db import list_applications
+
+            apps = list_applications(conn)
+            return jsonify([dict(row) for row in apps])
+        finally:
+            conn.close()
+
+    @app.route("/api/actions")
+    def api_actions():
+        conn = _get_db()
+        try:
+            from emploi.db import list_next_actions
+
+            actions = list_next_actions(conn)
+            return jsonify(actions)
+        finally:
+            conn.close()
+
+    @app.route("/api/searches")
+    def api_searches():
+        conn = _get_db()
+        try:
+            from emploi.db import list_saved_searches
+
+            searches = list_saved_searches(conn)
+            return jsonify([dict(row) for row in searches])
         finally:
             conn.close()
 
     return app
 
 
-def run_dashboard(host: str = "127.0.0.1", port: int = 8050) -> None:
+def run_dashboard(host: str = "0.0.0.0", port: int = 8050) -> None:
     """Start the dashboard server."""
     app = create_app()
     logger.info("Dashboard starting on http://%s:%d", host, port)
