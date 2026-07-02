@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emploi — {{ offer.title }}</title>
+    <style>
+        :root {
+            --bg: #f5f5f5; --card-bg: white; --text: #333; --text-muted: #666;
+            --border: #ddd; --primary: #1a1a2e; --primary-hover: #16213e;
+            --green: #27ae60; --yellow: #f39c12; --red: #e74c3c;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-muted: #999;
+                --border: #333; --primary: #e0e0e0; --primary-hover: #ccc;
+            }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        .header { background: var(--primary); color: white; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.5rem; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .header a { color: white; text-decoration: none; opacity: 0.7; font-size: 0.9rem; }
+        .header a:hover { opacity: 1; }
+        .container { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+        .card { background: var(--card-bg); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .card-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .card-title a { color: var(--text); text-decoration: none; }
+        .card-title a:hover { text-decoration: underline; }
+        .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.8rem; margin: 1rem 0; }
+        .meta-item { display: flex; align-items: center; gap: 0.5rem; }
+        .meta-label { font-size: 0.8rem; color: var(--text-muted); min-width: 80px; }
+        .meta-value { font-weight: 500; }
+        .score-section { display: flex; align-items: center; gap: 1rem; margin: 1rem 0; padding: 1rem; background: var(--bg); border-radius: 8px; }
+        .score-big { font-size: 2rem; font-weight: 700; }
+        .score-high { color: var(--green); }
+        .score-mid { color: var(--yellow); }
+        .score-low { color: var(--red); }
+        .score-reasons { flex: 1; }
+        .score-reason { font-size: 0.85rem; padding: 0.2rem 0; }
+        .score-reason::before { content: "• "; color: var(--text-muted); }
+        .actions-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+        .btn { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 500; text-decoration: none; display: inline-flex; align-items: center; gap: 0.3rem; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-success { background: var(--green); color: white; }
+        .btn-warning { background: var(--yellow); color: white; }
+        .btn-danger { background: var(--red); color: white; }
+        .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
+        .description { line-height: 1.6; white-space: pre-wrap; font-size: 0.95rem; }
+        .events { margin-top: 1rem; }
+        .event { display: flex; gap: 0.8rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+        .event-type { font-weight: 600; min-width: 120px; color: var(--text-muted); }
+        .event-time { color: var(--text-muted); min-width: 100px; }
+        .notes-section { margin-top: 1rem; }
+        .note { background: var(--bg); padding: 0.8rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .note-time { font-size: 0.75rem; color: var(--text-muted); }
+        .note-form { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+        .note-form textarea { flex: 1; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; resize: vertical; min-height: 60px; background: var(--card-bg); color: var(--text); }
+        .note-form button { align-self: flex-end; }
+        @media (max-width: 768px) {
+            .meta-grid { grid-template-columns: 1fr; }
+            .actions-bar { flex-direction: column; }
+            .btn { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ offer.title }}</h1>
+        <a href="/">← Retour</a>
+    </div>
+    <div class="container">
+        <div class="card">
+            <div class="card-title">
+                {% if offer.url %}<a href="{{ offer.url }}" target="_blank" rel="noopener">{{ offer.title }}</a>
+                {% else %}{{ offer.title }}{% endif %}
+            </div>
+
+            <div class="meta-grid">
+                {% if offer.company %}<div class="meta-item"><span class="meta-label">🏢 Entreprise</span><span class="meta-value">{{ offer.company }}</span></div>{% endif %}
+                {% if offer.location %}<div class="meta-item"><span class="meta-label">📍 Lieu</span><span class="meta-value">{{ offer.location }}</span></div>{% endif %}
+                {% if offer.contract_type %}<div class="meta-item"><span class="meta-label">📄 Contrat</span><span class="meta-value">{{ offer.contract_type }}</span></div>{% endif %}
+                {% if offer.salary %}<div class="meta-item"><span class="meta-label">💰 Salaire</span><span class="meta-value">{{ offer.salary }}</span></div>{% endif %}
+                {% if offer.remote %}<div class="meta-item"><span class="meta-label">🏠 Remote</span><span class="meta-value">{{ offer.remote }}</span></div>{% endif %}
+                <div class="meta-item"><span class="meta-label">📊 Score</span><span class="meta-value">{{ offer.score }}/100</span></div>
+                <div class="meta-item"><span class="meta-label">📌 Statut</span><span class="meta-value">{{ offer.status }}</span></div>
+                <div class="meta-item"><span class="meta-label">🌐 Source</span><span class="meta-value">{{ offer.external_source or offer.source }}</span></div>
+                {% if offer.created_at %}<div class="meta-item"><span class="meta-label">📅 Créé</span><span class="meta-value">{{ offer.created_at }}</span></div>{% endif %}
+            </div>
+
+            <div class="score-section">
+                <div class="score-big {{ 'score-high' if offer.score >= 70 else ('score-mid' if offer.score >= 50 else 'score-low') }}">{{ offer.score }}</div>
+                <div class="score-reasons">
+                    {% for reason in offer.score_reasons.split('\n') if reason.strip() %}
+                    <div class="score-reason">{{ reason }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="actions-bar">
+                {% if offer.url %}<a href="{{ offer.url }}" target="_blank" rel="noopener" class="btn btn-primary">🔗 Ouvrir l'offre</a>{% endif %}
+                {% if offer.browser_url %}<a href="{{ offer.browser_url }}" target="_blank" rel="noopener" class="btn btn-outline">🌐 Browser</a>{% endif %}
+                <button class="btn btn-success" onclick="updateStatus('interesting')">⭐ Intéressant</button>
+                <button class="btn btn-warning" onclick="updateStatus('applied')">📤 Postulé</button>
+                <button class="btn btn-danger" onclick="updateStatus('rejected')">❌ Rejeter</button>
+                <button class="btn btn-outline" onclick="updateStatus('archived')">📦 Archiver</button>
+            </div>
+        </div>
+
+        {% if offer.description %}
+        <div class="card">
+            <h3 style="margin-bottom:0.8rem">📝 Description</h3>
+            <div class="description">{{ offer.description }}</div>
+        </div>
+        {% endif %}
+
+        {% if notes %}
+        <div class="card notes-section">
+            <h3 style="margin-bottom:0.8rem">📒 Notes</h3>
+            {% for note in notes %}
+            <div class="note">
+                <div class="note-time">{{ note.created_at }}</div>
+                <div>{{ note.note }}</div>
+            </div>
+            {% endfor %}
+            <div class="note-form">
+                <textarea id="note-text" placeholder="Ajouter une note..."></textarea>
+                <button class="btn btn-primary" onclick="addNote()">Ajouter</button>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if events %}
+        <div class="card events">
+            <h3 style="margin-bottom:0.8rem">📜 Historique</h3>
+            {% for event in events %}
+            <div class="event">
+                <span class="event-type">{{ event.event_type }}</span>
+                <span>{{ event.message }}</span>
+                <span class="event-time">{{ event.created_at }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function updateStatus(status) {
+            fetch('/api/offer/{{ offer.id }}/status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status: status})
+            }).then(r => r.json()).then(d => {
+                if (d.ok) location.reload();
+                else alert('Erreur: ' + (d.error || 'inconnue'));
+            });
+        }
+        function addNote() {
+            const text = document.getElementById('note-text').value.trim();
+            if (!text) return;
+            fetch('/api/offer/{{ offer.id }}/note', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({note: text})
+            }).then(r => r.json()).then(d => {
+                if (d.ok) location.reload();
+                else alert('Erreur: ' + (d.error || 'inconnue'));
+            });
+        }
+    </script>
+</body>
+</html>

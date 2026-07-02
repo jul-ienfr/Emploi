@@ -290,6 +290,81 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Offer detail ────────────────────────────────────────────────────
+
+    @app.route("/offer/<int:offer_id>")
+    def offer_detail(offer_id):
+        conn = _get_db()
+        try:
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if offer is None:
+                from flask import abort
+
+                abort(404)
+            events = conn.execute(
+                "SELECT * FROM offer_events WHERE offer_id = ? ORDER BY created_at DESC",
+                (offer_id,),
+            ).fetchall()
+            notes = []
+            try:
+                notes = conn.execute(
+                    "SELECT * FROM offer_notes WHERE offer_id = ? ORDER BY created_at DESC",
+                    (offer_id,),
+                ).fetchall()
+            except Exception:
+                pass  # table may not exist yet
+            return render_template("offer.html", offer=offer, events=events, notes=notes)
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/status", methods=["POST"])
+    def api_update_offer_status(offer_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        new_status = data.get("status", "").strip()
+        if not new_status:
+            return jsonify({"error": "status required"}), 400
+        conn = _get_db()
+        try:
+            conn.execute(
+                "UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_status, offer_id),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "status": new_status})
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/note", methods=["POST"])
+    def api_add_offer_note(offer_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        note_text = data.get("note", "").strip()
+        if not note_text:
+            return jsonify({"error": "note required"}), 400
+        conn = _get_db()
+        try:
+            # Ensure table exists
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS offer_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER NOT NULL,
+                    note TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO offer_notes (offer_id, note) VALUES (?, ?)",
+                (offer_id, note_text),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
     # ── Prochaines actions ──────────────────────────────────────────────
 
     @app.route("/actions")

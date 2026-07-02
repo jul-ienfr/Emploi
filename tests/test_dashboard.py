@@ -264,3 +264,72 @@ def test_actions_page(tmp_path, monkeypatch):
         resp = client.get("/actions")
         assert resp.status_code == 200
         assert b"actions" in resp.data.lower() or b"Aucune" in resp.data
+
+
+# ── Offer detail ────────────────────────────────────────────────────────────
+
+
+def test_offer_detail(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Dev Python", company="Acme", location="Paris", description="Poste Python CDI")
+    with _get_app().test_client() as client:
+        resp = client.get(f"/offer/{offer_id}")
+        assert resp.status_code == 200
+        assert b"Dev Python" in resp.data
+        assert b"Acme" in resp.data
+        assert b"Paris" in resp.data
+
+
+def test_offer_detail_404(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/offer/999")
+        assert resp.status_code == 404
+
+
+def test_offer_update_status(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/offer/{offer_id}/status",
+            json={"status": "interesting"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        assert data["status"] == "interesting"
+
+
+def test_offer_add_note(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/offer/{offer_id}/note",
+            json={"note": "Bonne offre, à suivre"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        # Verify note was saved
+        resp2 = client.get(f"/offer/{offer_id}")
+        assert b"Bonne offre" in resp2.data
+
+
+def test_offer_detail_with_events(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+        from emploi.db import add_offer_event
+
+        add_offer_event(conn, offer_id, event_type="search_seen", message="Found in search")
+    with _get_app().test_client() as client:
+        resp = client.get(f"/offer/{offer_id}")
+        assert resp.status_code == 200
+        assert b"search_seen" in resp.data
