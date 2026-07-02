@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emploi — Profils & Daemon</title>
+    <style>
+        :root { --bg: #f5f5f5; --card-bg: white; --text: #333; --text-muted: #666; --border: #ddd; --primary: #1a1a2e; --primary-hover: #16213e; --green: #27ae60; --red: #e74c3c; }
+        @media (prefers-color-scheme: dark) { :root { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-muted: #999; --border: #333; --primary: #e0e0e0; } }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        .header { background: var(--primary); color: white; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .header a { color: white; text-decoration: none; opacity: 0.7; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
+        .section { margin-bottom: 2rem; }
+        .section h2 { font-size: 1.2rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--border); }
+        .card { background: var(--card-bg); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 0.8rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; }
+        .card-info { flex: 1; }
+        .card-name { font-weight: 600; }
+        .card-detail { font-size: 0.85rem; color: var(--text-muted); }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+        .badge-default { background: #d1fae5; color: #065f46; }
+        .badge-active { background: #d1fae5; color: #065f46; }
+        .badge-inactive { background: #fee2e2; color: #991b1b; }
+        .btn { padding: 0.4rem 0.8rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; text-decoration: none; }
+        .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+        .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
+        .btn-outline:hover { background: var(--border); }
+        .btn-primary { background: var(--primary); color: white; }
+        .actions { display: flex; gap: 0.3rem; }
+        .empty { text-align: center; padding: 2rem; color: var(--text-muted); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.3rem; }
+        .status-ok { background: var(--green); }
+        .status-err { background: var(--red); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚙️ Profils & Configuration</h1>
+        <a href="/">← Retour</a>
+    </div>
+    <div class="container">
+        <!-- Browser profiles -->
+        <div class="section">
+            <h2>🌐 Profils Browser</h2>
+            {% if browser_profiles %}
+            {% for p in browser_profiles %}
+            <div class="card">
+                <div class="card-info">
+                    <div class="card-name">{{ p.key }} <span class="card-detail">→ {{ p.profile }}</span></div>
+                    {% if p.default %}<span class="badge badge-default">Défaut</span>{% endif %}
+                </div>
+                <div class="actions">
+                    <button class="btn btn-outline btn-sm" onclick="browserStatus('{{ p.key }}')">Status</button>
+                    <button class="btn btn-outline btn-sm" onclick="setDefault('{{ p.key }}')">Défaut</button>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty">Aucun profil browser configuré</div>
+            {% endif %}
+        </div>
+
+        <!-- Saved searches -->
+        <div class="section">
+            <h2>🔍 Profils de recherche</h2>
+            {% if searches %}
+            {% for s in searches %}
+            <div class="card">
+                <div class="card-info">
+                    <div class="card-name">{{ s.name }}</div>
+                    <div class="card-detail">Query: {{ s.query }}{% if s.where_text %} | Lieu: {{ s.where_text }}{% endif %}</div>
+                </div>
+                <div class="actions">
+                    <span class="badge {{ 'badge-active' if s.enabled else 'badge-inactive' }}">
+                        {{ 'Actif' if s.enabled else 'Inactif' }}
+                    </span>
+                    <button class="btn btn-outline btn-sm" onclick="toggleSearch({{ s.id }})">Toggle</button>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty">Aucun profil de recherche configuré</div>
+            {% endif %}
+        </div>
+
+        <!-- Daemon status -->
+        <div class="section">
+            <h2>🤖 Status Daemon</h2>
+            <div class="card">
+                <div class="card-info">
+                    <div class="card-name">
+                        <span class="status-dot {{ 'status-ok' if daemon_status.ok else 'status-err' }}"></span>
+                        {{ 'En cours' if daemon_status.ok else 'Arrêté' }}
+                    </div>
+                    <div class="card-detail">Dernier cycle: {{ daemon_status.last_cycle or 'Jamais' }}</div>
+                    <div class="card-detail">Offres: {{ daemon_status.total_offers }} | Erreurs: {{ daemon_status.errors }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function setDefault(key) {
+            fetch(`/api/profiles/${key}/default`, {method: 'POST'}).then(() => location.reload());
+        }
+        function toggleSearch(id) {
+            fetch(`/api/searches/${id}/toggle`, {method: 'POST'}).then(() => location.reload());
+        }
+        function browserStatus(key) {
+            fetch(`/api/profiles/${key}/status`).then(r=>r.json()).then(d=>{
+                alert(JSON.stringify(d, null, 2));
+            });
+        }
+    </script>
+</body>
+</html>

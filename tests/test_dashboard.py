@@ -522,3 +522,15 @@ def test_compare_api(tmp_path, monkeypatch):
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert len(data) == 2
+
+
+# ── Profiles, daemon, searches ──────────────────────────────────────────────
+
+
+def test_profiles_page(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/profiles")
+        assert resp.status_code == 200
+        assert b"Profils" in resp.data

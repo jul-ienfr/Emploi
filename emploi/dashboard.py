@@ -384,6 +384,69 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Profiles, daemon, searches ──────────────────────────────────────
+
+    @app.route("/profiles")
+    def profiles_page():
+        from emploi.config import list_accounts
+        from emploi.db import list_saved_searches
+
+        browser_profiles = list_accounts()
+        searches = list_saved_searches(conn=_get_db()) if True else []
+        conn = _get_db()
+        try:
+            searches = list_saved_searches(conn)
+        finally:
+            conn.close()
+
+        # Daemon status (basic)
+        daemon_status = {"ok": False, "last_cycle": "N/A", "total_offers": 0, "errors": 0}
+
+        return render_template(
+            "profiles.html",
+            browser_profiles=browser_profiles,
+            searches=searches,
+            daemon_status=daemon_status,
+        )
+
+    @app.route("/api/profiles/<key>/default", methods=["POST"])
+    def api_set_default_profile(key):
+        from emploi.config import _accounts_file, _load_json, _write_json
+
+        data = _load_json(_accounts_file()) or {}
+        if key not in data.get("profiles", {}):
+            return jsonify({"error": "Profile not found"}), 404
+        data["default"] = key
+        _write_json(_accounts_file(), data)
+        return jsonify({"ok": True})
+
+    @app.route("/api/profiles/<key>/status")
+    def api_profile_status(key):
+        from emploi.browser.client import ManagedBrowserClient
+
+        try:
+            client = ManagedBrowserClient()
+            result = client.status(profile=key)
+            return jsonify({"ok": True, "status": result.payload.get("status", "unknown")})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/api/searches/<int:search_id>/toggle", methods=["POST"])
+    def api_toggle_search(search_id):
+        conn = _get_db()
+        try:
+            from emploi.db import get_saved_search, set_saved_search_enabled
+
+            saved = get_saved_search(conn, search_id)
+            if saved is None:
+                return jsonify({"error": "Search not found"}), 404
+            new_enabled = not saved["enabled"]
+            set_saved_search_enabled(conn, search_id, new_enabled)
+            conn.commit()
+            return jsonify({"ok": True, "enabled": new_enabled})
+        finally:
+            conn.close()
+
     # ── Compare offers ──────────────────────────────────────────────────
 
     @app.route("/compare")
