@@ -196,3 +196,60 @@ def test_inactive_offers_hidden(tmp_path, monkeypatch):
         resp = client.get("/")
         assert b"Active" in resp.data
         assert b"Inactive" not in resp.data
+
+
+# ── Applications Kanban ─────────────────────────────────────────────────────
+
+
+def test_applications_page(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/applications")
+        assert resp.status_code == 200
+        assert b"Candidatures" in resp.data
+
+
+def test_applications_page_with_apps(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Dev Python", company="Acme", location="Paris")
+        from emploi.db import add_application
+
+        add_application(conn, offer_id, status="draft")
+        add_application(conn, offer_id, status="sent")
+    with _get_app().test_client() as client:
+        resp = client.get("/applications")
+        assert resp.status_code == 200
+        assert b"Dev Python" in resp.data
+        assert b"Brouillon" in resp.data
+        assert b"Envoy" in resp.data
+
+
+def test_api_update_application_status(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Dev Python", company="Acme", location="Paris")
+        from emploi.db import add_application
+
+        app_id = add_application(conn, offer_id, status="draft")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/applications/{app_id}/status",
+            json={"status": "sent"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        assert data["status"] == "sent"
+
+
+def test_api_update_application_status_invalid(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/applications/999/status",
+            json={"status": "sent"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400

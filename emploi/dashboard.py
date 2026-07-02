@@ -289,6 +289,55 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Applications Kanban ─────────────────────────────────────────────
+
+    @app.route("/applications")
+    def applications_page():
+        conn = _get_db()
+        try:
+            # Fetch applications with offer scores
+            rows = conn.execute(
+                "SELECT a.*, o.title, o.company, o.score, o.url "
+                "FROM applications a JOIN offers o ON o.id = a.offer_id "
+                "ORDER BY o.score DESC"
+            ).fetchall()
+            columns = [
+                {"status": "draft", "label": "Brouillon", "icon": "📝", "offers": []},
+                {"status": "sent", "label": "Envoyé", "icon": "📤", "offers": []},
+                {"status": "followup", "label": "Relance", "icon": "🔄", "offers": []},
+                {"status": "interview", "label": "Entretien", "icon": "🎤", "offers": []},
+                {"status": "rejected", "label": "Refusé", "icon": "❌", "offers": []},
+            ]
+            status_map = {c["status"]: c for c in columns}
+            for row in rows:
+                s = row["status"]
+                if s in status_map:
+                    status_map[s]["offers"].append(row)
+            return render_template("applications.html", columns=columns)
+        finally:
+            conn.close()
+
+    @app.route("/api/applications/<int:app_id>/status", methods=["POST"])
+    def api_update_application_status(app_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        new_status = data.get("status", "").strip()
+        if not new_status:
+            return jsonify({"error": "status required"}), 400
+        conn = _get_db()
+        try:
+            from emploi.db import update_application_status
+
+            try:
+                update_application_status(conn, app_id, new_status)
+                conn.commit()
+                return jsonify({"ok": True, "status": new_status})
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+        finally:
+            conn.close()
+
     return app
 
 

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emploi — Candidatures</title>
+    <style>
+        :root {
+            --bg: #f5f5f5; --card-bg: white; --text: #333; --text-muted: #666;
+            --border: #ddd; --primary: #1a1a2e; --primary-hover: #16213e;
+            --green: #27ae60; --yellow: #f39c12; --red: #e74c3c;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-muted: #999;
+                --border: #333; --primary: #e0e0e0; --primary-hover: #ccc;
+            }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        .header { background: var(--primary); color: white; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.5rem; }
+        .header a { color: white; text-decoration: none; opacity: 0.7; font-size: 0.9rem; }
+        .header a:hover { opacity: 1; }
+        .kanban { display: flex; gap: 1rem; padding: 1.5rem; overflow-x: auto; min-height: calc(100vh - 80px); }
+        .column { min-width: 280px; max-width: 320px; flex: 1; background: var(--card-bg); border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .column-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--border); }
+        .column-title { font-weight: 600; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .column-count { background: var(--primary); color: white; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem; margin-bottom: 0.5rem; cursor: grab; transition: box-shadow 0.15s; }
+        .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+        .card.dragging { opacity: 0.5; }
+        .card-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+        .card-title a { color: var(--text); text-decoration: none; }
+        .card-title a:hover { text-decoration: underline; }
+        .card-meta { font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .card-score { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
+        .score-high { background: #d1fae5; color: #065f46; }
+        .score-mid { background: #fef3c7; color: #92400e; }
+        .score-low { background: #fee2e2; color: #991b1b; }
+        .empty-col { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.85rem; }
+        @media (max-width: 768px) {
+            .kanban { flex-direction: column; }
+            .column { min-width: auto; max-width: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📋 Candidatures</h1>
+        <a href="/">← Retour aux offres</a>
+    </div>
+    <div class="kanban">
+        {% for col in columns %}
+        <div class="column" data-status="{{ col.status }}">
+            <div class="column-header">
+                <span class="column-title">{{ col.icon }} {{ col.label }}</span>
+                <span class="column-count">{{ col.offers|length }}</span>
+            </div>
+            {% if col.offers %}
+            {% for app in col.offers %}
+            <div class="card" draggable="true" data-id="{{ app.id }}">
+                <div class="card-title">
+                    <a href="/offer/{{ app.offer_id }}">{{ app.title }}</a>
+                </div>
+                <div class="card-meta">
+                    {% if app.company %}<span>🏢 {{ app.company }}</span>{% endif %}
+                    <span class="card-score {{ 'score-high' if app.score >= 70 else ('score-mid' if app.score >= 50 else 'score-low') }}">{{ app.score }}/100</span>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty-col">Aucune candidature</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    <script>
+        // Simple drag and drop
+        document.querySelectorAll('.card').forEach(card => {
+            card.addEventListener('dragstart', e => {
+                card.classList.add('dragging');
+                e.dataTransfer.setData('text/plain', card.dataset.id);
+            });
+            card.addEventListener('dragend', () => card.classList.remove('dragging'));
+        });
+        document.querySelectorAll('.column').forEach(col => {
+            col.addEventListener('dragover', e => { e.preventDefault(); col.style.background = 'rgba(0,0,0,0.03)'; });
+            col.addEventListener('dragleave', () => { col.style.background = ''; });
+            col.addEventListener('drop', e => {
+                e.preventDefault();
+                col.style.background = '';
+                const id = e.dataTransfer.getData('text/plain');
+                const newStatus = col.dataset.status;
+                fetch(`/api/applications/${id}/status`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: newStatus})
+                }).then(() => location.reload());
+            });
+        });
+    </script>
+</body>
+</html>
