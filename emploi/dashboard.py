@@ -448,6 +448,106 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Offer age and stale cleanup ─────────────────────────────────────
+
+    @app.route("/api/offers/cleanup", methods=["POST"])
+    def api_cleanup_stale():
+        stale_days = int(os.environ.get("EMPLOI_DASHBOARD_STALE_DAYS", "30"))
+        conn = _get_db()
+        try:
+            conn.execute(
+                f"UPDATE offers SET is_active = 0, status = 'archived', "
+                f"updated_at = CURRENT_TIMESTAMP "
+                f"WHERE is_active = 1 AND created_at < datetime('now', '-{stale_days} days')"
+            )
+            conn.commit()
+            return jsonify({"ok": True, "stale_days": stale_days})
+        finally:
+            conn.close()
+
+    # ── Search history ──────────────────────────────────────────────────
+
+    @app.route("/api/search-history")
+    def api_search_history():
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS search_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query TEXT NOT NULL,
+                    filters_json TEXT DEFAULT '{}',
+                    results_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            rows = conn.execute("SELECT * FROM search_history ORDER BY created_at DESC LIMIT 20").fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/api/search-history", methods=["POST"])
+    def api_add_search_history():
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        query = data.get("query", "").strip()
+        if not query:
+            return jsonify({"error": "query required"}), 400
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS search_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query TEXT NOT NULL,
+                    filters_json TEXT DEFAULT '{}',
+                    results_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO search_history (query, filters_json, results_count) VALUES (?, ?, ?)",
+                (query, json.dumps(data.get("filters", {})), data.get("results_count", 0)),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── RSS feed ────────────────────────────────────────────────────────
+
+    @app.route("/rss")
+    def rss_feed():
+        conn = _get_db()
+        try:
+            offers = conn.execute(
+                "SELECT * FROM offers WHERE is_active = 1 "
+                "AND created_at >= datetime('now', '-1 day') "
+                "ORDER BY created_at DESC LIMIT 50"
+            ).fetchall()
+            items = ""
+            for o in offers:
+                url = o["url"] or f"/offer/{o['id']}"
+                items += f"""<item>
+                    <title>{o['title']}</title>
+                    <link>{url}</link>
+                    <description>{(o['description'] or '')[:500]}</description>
+                    <pubDate>{o['created_at']}</pubDate>
+                </item>\n"""
+            from flask import Response
+
+            rss = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+    <title>Emploi — Nouvelles offres</title>
+    <link>/</link>
+    <description>Dernières offres d'emploi</description>
+    {items}
+</channel>
+</rss>"""
+            return Response(rss, mimetype="application/rss+xml")
+        finally:
+            conn.close()
+
     # ── Profiles, daemon, searches ──────────────────────────────────────
 
     @app.route("/profiles")

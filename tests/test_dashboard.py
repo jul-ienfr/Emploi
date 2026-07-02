@@ -600,3 +600,41 @@ def test_offer_history_and_undo(tmp_path, monkeypatch):
         # Undo
         resp = client.post(f"/api/offer/{oid}/undo", content_type="application/json")
         assert resp.status_code == 200
+
+
+# ── Cleanup, RSS, search history ────────────────────────────────────────────
+
+
+def test_cleanup_stale(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post("/api/offers/cleanup", content_type="application/json")
+        assert resp.status_code == 200
+
+
+def test_rss_feed(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="New Offer", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.get("/rss")
+        assert resp.status_code == 200
+        assert b"New Offer" in resp.data
+
+
+def test_search_history(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        # Add a search
+        resp = client.post(
+            "/api/search-history",
+            json={"query": "python", "results_count": 5},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        # List searches
+        resp2 = client.get("/api/search-history")
+        assert resp2.status_code == 200
+        data = json.loads(resp2.data)
+        assert len(data) == 1
+        assert data[0]["query"] == "python"
