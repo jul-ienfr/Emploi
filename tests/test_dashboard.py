@@ -359,3 +359,75 @@ def test_chart_data(tmp_path, monkeypatch):
         assert "by_score" in data
         assert "by_status" in data
         assert "by_contract" in data
+
+
+# ── Export ──────────────────────────────────────────────────────────────────
+
+
+def test_export_csv(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="Dev Python", company="Acme", location="Paris")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/export?format=csv")
+        assert resp.status_code == 200
+        assert "text/csv" in resp.content_type
+        assert b"Dev Python" in resp.data
+
+
+def test_export_json(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/export?format=json")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert len(data) == 1
+        assert data[0]["title"] == "Test"
+
+
+def test_export_markdown(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="Dev Python", company="Acme", location="Paris")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/export?format=markdown")
+        assert resp.status_code == 200
+        assert b"Dev Python" in resp.data
+        assert b"Acme" in resp.data
+
+
+# ── Batch operations ────────────────────────────────────────────────────────
+
+
+def test_batch_status(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        id1 = add_offer(conn, title="A", company="Co", location="X")
+        id2 = add_offer(conn, title="B", company="Co", location="Y")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/offers/batch/status",
+            json={"ids": [id1, id2], "status": "interesting"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        assert data["updated"] == 2
+
+
+def test_batch_archive(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        id1 = add_offer(conn, title="A", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/offers/batch/archive",
+            json={"ids": [id1]},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True

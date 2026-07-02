@@ -10,6 +10,7 @@ Requires Flask: pip install flask
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -287,6 +288,143 @@ def create_app() -> object:
 
             searches = list_saved_searches(conn)
             return jsonify([dict(row) for row in searches])
+        finally:
+            conn.close()
+
+    # ── Export ──────────────────────────────────────────────────────────
+
+    @app.route("/api/export")
+    def api_export():
+        fmt = request.args.get("format", "csv").strip()
+        q = request.args.get("q", "").strip()
+        source_filter = request.args.get("source", "").strip()
+        status = request.args.get("status", "").strip()
+
+        conn = _get_db()
+        try:
+            where = ["is_active = 1"]
+            params: list = []
+            if q:
+                where.append("(title LIKE ? OR company LIKE ?)")
+                params.extend([f"%{q}%", f"%{q}%"])
+            if source_filter:
+                where.append("(external_source = ? OR source = ?)")
+                params.extend([source_filter, source_filter])
+            if status:
+                where.append("status = ?")
+                params.append(status)
+            where_clause = "WHERE " + " AND ".join(where)
+
+            offers = conn.execute(
+                f"SELECT title, company, location, url, contract_type, salary, remote, "
+                f"source, external_source, score, status, created_at "
+                f"FROM offers {where_clause} ORDER BY score DESC",
+                params,
+            ).fetchall()
+
+            if fmt == "json":
+                from flask import Response
+
+                data = [dict(row) for row in offers]
+                return Response(
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                    mimetype="application/json",
+                    headers={"Content-Disposition": "attachment; filename=emploi_offers.json"},
+                )
+            elif fmt == "markdown":
+                lines = ["# Offres Emploi\n"]
+                for row in offers:
+                    lines.append(f"## {row['title']}")
+                    lines.append(f"- **Entreprise** : {row['company']}")
+                    lines.append(f"- **Lieu** : {row['location']}")
+                    lines.append(f"- **Score** : {row['score']}/100")
+                    lines.append(f"- **Source** : {row['external_source'] or row['source']}")
+                    if row["url"]:
+                        lines.append(f"- **Lien** : {row['url']}")
+                    lines.append("")
+                from flask import Response
+
+                return Response(
+                    "\n".join(lines),
+                    mimetype="text/markdown",
+                    headers={"Content-Disposition": "attachment; filename=emploi_offers.md"},
+                )
+            else:  # csv
+                import csv
+                import io
+
+                buf = io.StringIO()
+                writer = csv.DictWriter(
+                    buf,
+                    fieldnames=[
+                        "title",
+                        "company",
+                        "location",
+                        "url",
+                        "contract_type",
+                        "salary",
+                        "remote",
+                        "source",
+                        "external_source",
+                        "score",
+                        "status",
+                        "created_at",
+                    ],
+                )
+                writer.writeheader()
+                for row in offers:
+                    writer.writerow(dict(row))
+                from flask import Response
+
+                return Response(
+                    buf.getvalue(),
+                    mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=emploi_offers.csv"},
+                )
+        finally:
+            conn.close()
+
+    # ── Batch operations ────────────────────────────────────────────────
+
+    @app.route("/api/offers/batch/status", methods=["POST"])
+    def api_batch_status():
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        ids = data.get("ids", [])
+        status = data.get("status", "").strip()
+        if not ids or not status:
+            return jsonify({"error": "ids and status required"}), 400
+        conn = _get_db()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                [status] + ids,
+            )
+            conn.commit()
+            return jsonify({"ok": True, "updated": len(ids)})
+        finally:
+            conn.close()
+
+    @app.route("/api/offers/batch/archive", methods=["POST"])
+    def api_batch_archive():
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        ids = data.get("ids", [])
+        if not ids:
+            return jsonify({"error": "ids required"}), 400
+        conn = _get_db()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE offers SET status = 'archived', is_active = 0, "
+                f"updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                ids,
+            )
+            conn.commit()
+            return jsonify({"ok": True, "archived": len(ids)})
         finally:
             conn.close()
 
