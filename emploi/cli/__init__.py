@@ -330,6 +330,7 @@ import emploi.cli.nextcloud  # noqa: E402, F401
 import emploi.cli.offer  # noqa: E402, F401
 import emploi.cli.option  # noqa: E402, F401
 import emploi.cli.report  # noqa: E402, F401
+import emploi.cli.search_all  # noqa: E402, F401
 import emploi.cli.search_profile  # noqa: E402, F401
 
 if __name__ == "__main__":
