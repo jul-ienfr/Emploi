@@ -387,8 +387,8 @@ class TestSearchProfileRunDispatch:
             dispatched_to.append("hellowork")
             return []
 
-        monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
-        monkeypatch.setattr("emploi.cli.run_hellowork_saved_search", fake_run_hellowork_saved_search)
+        monkeypatch.setattr("emploi.cli.search_profile.run_saved_search", fake_run_saved_search)
+        monkeypatch.setattr("emploi.cli.search_profile.run_hellowork_saved_search", fake_run_hellowork_saved_search)
 
         from typer.testing import CliRunner
         runner = CliRunner()
@@ -422,8 +422,8 @@ class TestSearchProfileRunDispatch:
             dispatched_to.append("hellowork")
             return []
 
-        monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
-        monkeypatch.setattr("emploi.cli.run_hellowork_saved_search", fake_run_hellowork_saved_search)
+        monkeypatch.setattr("emploi.cli.search_profile.run_saved_search", fake_run_saved_search)
+        monkeypatch.setattr("emploi.cli.search_profile.run_hellowork_saved_search", fake_run_hellowork_saved_search)
 
         from typer.testing import CliRunner
         runner = CliRunner()

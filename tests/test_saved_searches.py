@@ -163,7 +163,7 @@ def test_search_profile_cli_add_list_and_run(tmp_path, monkeypatch):
             SearchImportResult(1, True, "Technicien support", 80, "https://candidat.francetravail.fr/offres/recherche/detail/ABC123"),
         ]
 
-    monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
+    monkeypatch.setattr("emploi.cli.search_profile.run_saved_search", fake_run_saved_search)
 
     added = runner.invoke(
         app,
@@ -237,7 +237,7 @@ def test_search_profile_run_all_skips_disabled_profiles(tmp_path, monkeypatch):
         seen.append(search_id_or_name)
         return []
 
-    monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
+    monkeypatch.setattr("emploi.cli.search_profile.run_saved_search", fake_run_saved_search)
 
     ran = runner.invoke(app, ["search-profile", "run", "--all"])
 
@@ -312,12 +312,12 @@ def test_search_profile_run_all_reports_created_updated_enabled_and_last_run(tmp
             SearchImportResult(2, False, "Support N2", 70, "https://example.test/2"),
         ]
 
-    monkeypatch.setattr("emploi.cli.run_saved_search", fake_run_saved_search)
+    monkeypatch.setattr("emploi.cli.search_profile.run_saved_search", fake_run_saved_search)
 
     def fake_run_hellowork_saved_search(conn, search_id_or_name, *, site="france-travail", profile="emploi"):
         return []
 
-    monkeypatch.setattr("emploi.cli.run_hellowork_saved_search", fake_run_hellowork_saved_search)
+    monkeypatch.setattr("emploi.cli.search_profile.run_hellowork_saved_search", fake_run_hellowork_saved_search)
 
     ran = runner.invoke(app, ["search-profile", "run", "--all"])
     listed = runner.invoke(app, ["search-profile", "list"])

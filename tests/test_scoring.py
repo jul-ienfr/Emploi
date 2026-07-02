@@ -80,3 +80,52 @@ def test_score_offer_v2_penalizes_location_transport_unrealistic_and_high_effort
     assert "Contrat: freelance/stage/alternance moins prioritaire" in result.reasons
     assert "Réalisme: exigences trop élevées pour le profil visé" in result.reasons
     assert "Candidature: effort élevé ou friction importante" in result.reasons
+
+
+def test_score_offer_empty_fields():
+    """Empty offer should return base score without crashing."""
+    offer = {
+        "title": "",
+        "company": "",
+        "location": "",
+        "description": "",
+        "salary": "",
+        "remote": "",
+        "contract_type": "",
+        "notes": "",
+        "raw_extracted_text": "",
+    }
+    result = score_offer(offer)
+    assert 0 <= result.score <= 100
+
+
+def test_score_offer_unicode_heavy():
+    """Offer with unicode characters should score without errors."""
+    offer = {
+        "title": "Développeur Python 🐍 — Télétravail",
+        "company": "Société Française éphémère",
+        "location": "À côté de Genève, Suisse",
+        "description": "Poste avec accent grave et circonflexe, télétravail possible",
+        "contract_type": "CDI",
+    }
+    result = score_offer(offer)
+    assert 0 <= result.score <= 100
+
+
+def test_score_offer_mixed_signals():
+    """Offer with both positive and negative signals should land in between."""
+    offer = {
+        "title": "Support informatique",
+        "description": "Support helpdesk, mais permis B obligatoire et déplacements fréquents",
+        "remote": "pas de télétravail",
+        "contract_type": "CDD",
+    }
+    result = score_offer(offer)
+    assert 20 <= result.score <= 70
+
+
+def test_score_offer_reasons_are_strings():
+    """All score reasons should be non-empty strings."""
+    offer = {"title": "Test", "description": "Simple test offer"}
+    result = score_offer(offer)
+    assert all(isinstance(r, str) and r for r in result.reasons)

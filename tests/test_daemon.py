@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from emploi.daemon import _now_iso, _run_all_profiles
+from emploi.daemon import _now_iso, _run_all_profiles, watch_loop
 from emploi.db import add_saved_search, connect, init_db
 
 
@@ -56,3 +56,35 @@ def test_run_all_profiles_handles_error_in_profile(tmp_path, monkeypatch):
         with connect(db_path) as conn:
             # Should not raise — error in first profile is caught
             _run_all_profiles(conn, site="default", profile="default")
+
+
+def test_watch_loop_once_runs_one_cycle(tmp_path, monkeypatch):
+    """watch_loop(once=True) should execute exactly one cycle and stop."""
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path)
+    )
+    with connect(db_path) as conn:
+        init_db(conn)
+        add_saved_search(conn, name="test", query="python", enabled=True)
+
+    call_count = 0
+
+    def fake_run(conn, search_id, *, site, profile):
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    with patch("emploi.daemon.run_saved_search", side_effect=fake_run):
+        watch_loop(interval_minutes=60, once=True)
+
+    assert call_count == 1
+
+
+def test_watch_loop_once_handles_empty_profiles(tmp_path, monkeypatch):
+    """watch_loop(once=True) with no profiles should complete without error."""
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    with connect(db_path) as conn:
+        init_db(conn)
+
+    watch_loop(interval_minutes=60, once=True)

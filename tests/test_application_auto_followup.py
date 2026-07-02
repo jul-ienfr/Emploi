@@ -135,11 +135,11 @@ def test_pipeline_live_followup_does_not_create_sent_application_without_mark_se
         init_db(conn)
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
     monkeypatch.setattr(
-        "emploi.cli.export_application_to_nextcloud",
+        "emploi.cli.application.export_application_to_nextcloud",
         lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
     )
     monkeypatch.setattr(
-        "emploi.cli.create_offer_card",
+        "emploi.cli.application.create_offer_card",
         lambda *args, **kwargs: DeckCardResult(offer_id, 49, "Chauffeur PL", "", 123, False, False),
     )
 
@@ -167,11 +167,11 @@ def test_pipeline_live_followup_uses_existing_sent_application(monkeypatch, tmp_
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
         add_application(conn, offer_id, status="sent")
     monkeypatch.setattr(
-        "emploi.cli.export_application_to_nextcloud",
+        "emploi.cli.application.export_application_to_nextcloud",
         lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
     )
     monkeypatch.setattr(
-        "emploi.cli.create_offer_card",
+        "emploi.cli.application.create_offer_card",
         lambda *args, **kwargs: DeckCardResult(offer_id, 49, "Chauffeur PL", "", 123, False, False),
     )
 
@@ -201,11 +201,11 @@ def test_pipeline_live_followup_marks_sent_only_with_mark_sent(monkeypatch, tmp_
         init_db(conn)
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
     monkeypatch.setattr(
-        "emploi.cli.export_application_to_nextcloud",
+        "emploi.cli.application.export_application_to_nextcloud",
         lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
     )
     monkeypatch.setattr(
-        "emploi.cli.create_offer_card",
+        "emploi.cli.application.create_offer_card",
         lambda *args, **kwargs: DeckCardResult(offer_id, 49, "Chauffeur PL", "", 123, False, False),
     )
 
@@ -245,11 +245,11 @@ def test_pipeline_mark_sent_records_sent_application_without_followup(monkeypatc
         init_db(conn)
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
     monkeypatch.setattr(
-        "emploi.cli.export_application_to_nextcloud",
+        "emploi.cli.application.export_application_to_nextcloud",
         lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
     )
     monkeypatch.setattr(
-        "emploi.cli.create_offer_card",
+        "emploi.cli.application.create_offer_card",
         lambda *args, **kwargs: DeckCardResult(offer_id, 49, "Chauffeur PL", "", 123, False, False),
     )
 
