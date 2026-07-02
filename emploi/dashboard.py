@@ -290,6 +290,70 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Stats and charts ────────────────────────────────────────────────
+
+    @app.route("/stats")
+    def stats_page():
+        conn = _get_db()
+        try:
+            from emploi.db import application_summary
+
+            stats = application_summary(conn)
+            return render_template("stats.html", stats=stats)
+        finally:
+            conn.close()
+
+    @app.route("/api/chart-data")
+    def api_chart_data():
+        conn = _get_db()
+        try:
+            # By source
+            by_source = dict(
+                conn.execute(
+                    "SELECT COALESCE(NULLIF(external_source,''), source), COUNT(*) "
+                    "FROM offers WHERE is_active = 1 GROUP BY 1 ORDER BY COUNT(*) DESC"
+                ).fetchall()
+            )
+
+            # By score ranges
+            score_ranges = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+            for row in conn.execute("SELECT score FROM offers WHERE is_active = 1").fetchall():
+                s = row[0]
+                if s <= 20:
+                    score_ranges["0-20"] += 1
+                elif s <= 40:
+                    score_ranges["21-40"] += 1
+                elif s <= 60:
+                    score_ranges["41-60"] += 1
+                elif s <= 80:
+                    score_ranges["61-80"] += 1
+                else:
+                    score_ranges["81-100"] += 1
+
+            # By status
+            by_status = dict(
+                conn.execute("SELECT status, COUNT(*) FROM offers WHERE is_active = 1 GROUP BY 1").fetchall()
+            )
+
+            # By contract type
+            by_contract = dict(
+                conn.execute(
+                    "SELECT COALESCE(NULLIF(contract_type,''), 'N/A'), COUNT(*) "
+                    "FROM offers WHERE is_active = 1 GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 8"
+                ).fetchall()
+            )
+
+            return jsonify(
+                {
+                    "by_source": by_source,
+                    "by_score": score_ranges,
+                    "by_status": by_status,
+                    "by_contract": by_contract,
+                }
+            )
+        finally:
+            conn.close()
+
     # ── Offer detail ────────────────────────────────────────────────────
 
     @app.route("/offer/<int:offer_id>")

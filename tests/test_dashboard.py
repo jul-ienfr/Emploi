@@ -333,3 +333,29 @@ def test_offer_detail_with_events(tmp_path, monkeypatch):
         resp = client.get(f"/offer/{offer_id}")
         assert resp.status_code == 200
         assert b"search_seen" in resp.data
+
+
+# ── Stats and charts ────────────────────────────────────────────────────────
+
+
+def test_stats_page(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/stats")
+        assert resp.status_code == 200
+        assert b"Statistiques" in resp.data
+
+
+def test_chart_data(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="A", company="Co", location="X", source="apec", contract_type="CDI")
+        add_offer(conn, title="B", company="Co", location="Y", external_source="okjob", contract_type="CDD")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/chart-data")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert "by_source" in data
+        assert "by_score" in data
+        assert "by_status" in data
+        assert "by_contract" in data
