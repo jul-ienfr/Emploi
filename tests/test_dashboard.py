@@ -534,3 +534,69 @@ def test_profiles_page(tmp_path, monkeypatch):
         resp = client.get("/profiles")
         assert resp.status_code == 200
         assert b"Profils" in resp.data
+
+
+# ── Auth ────────────────────────────────────────────────────────────────────
+
+
+def test_auth_no_config_open_access(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/")
+        assert resp.status_code == 200
+
+
+def test_auth_api_key_rejects(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    monkeypatch.setenv("EMPLOI_DASHBOARD_API_KEY", "secret123")
+    from emploi.dashboard import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/")
+        assert resp.status_code == 401
+
+
+def test_auth_api_key_accepts(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    monkeypatch.setenv("EMPLOI_DASHBOARD_API_KEY", "secret123")
+    from emploi.dashboard import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/?api_key=secret123")
+        assert resp.status_code == 200
+
+
+def test_health_skips_auth(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    monkeypatch.setenv("EMPLOI_DASHBOARD_API_KEY", "secret123")
+    from emploi.dashboard import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+
+
+# ── Undo/Redo ───────────────────────────────────────────────────────────────
+
+
+def test_offer_history_and_undo(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        # Change status
+        client.post(f"/api/offer/{oid}/status", json={"status": "interesting"}, content_type="application/json")
+        # Check history
+        resp = client.get(f"/api/offer/{oid}/history")
+        assert resp.status_code == 200
+        history = json.loads(resp.data)
+        assert len(history) >= 1
+        # Undo
+        resp = client.post(f"/api/offer/{oid}/undo", content_type="application/json")
+        assert resp.status_code == 200

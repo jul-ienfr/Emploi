@@ -58,9 +58,14 @@ def create_app() -> object:
     _basedir = os.path.dirname(os.path.abspath(__file__))
     app = Flask(
         __name__,
-        template_folder=os.path.join(_basedir, "dashboard", "templates"),
-        static_folder=os.path.join(_basedir, "dashboard", "static"),
+        template_folder=os.path.join(_basedir, "_dashboard_ui", "templates"),
+        static_folder=os.path.join(_basedir, "_dashboard_ui", "static"),
     )
+
+    # ── Auth middleware ──────────────────────────────────────────────────
+    from emploi.dashboard_auth import setup_auth
+
+    setup_auth(app)
 
     # ── Security headers ────────────────────────────────────────────────
 
@@ -381,6 +386,65 @@ def create_app() -> object:
                     mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=emploi_offers.csv"},
                 )
+        finally:
+            conn.close()
+
+    # ── Undo/Redo and history ───────────────────────────────────────────
+
+    def _ensure_history_table(conn):
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS offer_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                offer_id INTEGER NOT NULL,
+                field TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                user TEXT DEFAULT 'dashboard',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (offer_id) REFERENCES offers(id)
+            )"""
+        )
+
+    def _log_change(conn, offer_id: int, field: str, old_value: str, new_value: str):
+        _ensure_history_table(conn)
+        conn.execute(
+            "INSERT INTO offer_history (offer_id, field, old_value, new_value) VALUES (?, ?, ?, ?)",
+            (offer_id, field, old_value, new_value),
+        )
+
+    @app.route("/api/offer/<int:offer_id>/history")
+    def api_offer_history(offer_id):
+        conn = _get_db()
+        try:
+            _ensure_history_table(conn)
+            rows = conn.execute(
+                "SELECT * FROM offer_history WHERE offer_id = ? ORDER BY created_at DESC",
+                (offer_id,),
+            ).fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/undo", methods=["POST"])
+    def api_offer_undo(offer_id):
+        conn = _get_db()
+        try:
+            _ensure_history_table(conn)
+            last = conn.execute(
+                "SELECT * FROM offer_history WHERE offer_id = ? ORDER BY id DESC LIMIT 1",
+                (offer_id,),
+            ).fetchone()
+            if last is None:
+                return jsonify({"error": "Nothing to undo"}), 400
+            # Restore old value
+            conn.execute(
+                f"UPDATE offers SET {last['field']} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (last["old_value"], offer_id),
+            )
+            # Log the undo
+            _log_change(conn, offer_id, last["field"], last["new_value"], last["old_value"])
+            conn.commit()
+            return jsonify({"ok": True, "undone": dict(last)})
         finally:
             conn.close()
 
@@ -717,6 +781,9 @@ def create_app() -> object:
             return jsonify({"error": "status required"}), 400
         conn = _get_db()
         try:
+            old = conn.execute("SELECT status FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if old:
+                _log_change(conn, offer_id, "status", str(old["status"]), new_status)
             conn.execute(
                 "UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (new_status, offer_id),
