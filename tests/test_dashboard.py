@@ -253,3 +253,14 @@ def test_api_update_application_status_invalid(tmp_path, monkeypatch):
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+
+# ── Actions ─────────────────────────────────────────────────────────────────
+
+
+def test_actions_page(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/actions")
+        assert resp.status_code == 200
+        assert b"actions" in resp.data.lower() or b"Aucune" in resp.data

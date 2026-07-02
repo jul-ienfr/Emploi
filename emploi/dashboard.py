@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 
 from emploi.logging import get_logger
 
@@ -286,6 +287,28 @@ def create_app() -> object:
 
             searches = list_saved_searches(conn)
             return jsonify([dict(row) for row in searches])
+        finally:
+            conn.close()
+
+    # ── Prochaines actions ──────────────────────────────────────────────
+
+    @app.route("/actions")
+    def actions_page():
+        conn = _get_db()
+        try:
+            from emploi.db import list_next_actions
+
+            actions = list_next_actions(conn)
+            today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+            overdue = sum(1 for a in actions if a.get("due_date") and a["due_date"] < today)
+            due_soon = sum(1 for a in actions if a.get("due_date") and a["due_date"] >= today)
+            return render_template(
+                "actions.html",
+                actions=actions,
+                today=today,
+                overdue=overdue,
+                due_soon=due_soon,
+            )
         finally:
             conn.close()
 

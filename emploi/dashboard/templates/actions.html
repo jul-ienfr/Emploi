@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emploi — Prochaines actions</title>
+    <style>
+        :root {
+            --bg: #f5f5f5; --card-bg: white; --text: #333; --text-muted: #666;
+            --border: #ddd; --primary: #1a1a2e; --primary-hover: #16213e;
+            --green: #27ae60; --yellow: #f39c12; --red: #e74c3c;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-muted: #999;
+                --border: #333; --primary: #e0e0e0; --primary-hover: #ccc;
+            }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        .header { background: var(--primary); color: white; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.5rem; }
+        .header a { color: white; text-decoration: none; opacity: 0.7; font-size: 0.9rem; }
+        .header a:hover { opacity: 1; }
+        .container { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+        .action-card { background: var(--card-bg); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 0.8rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid var(--primary); display: flex; justify-content: space-between; align-items: center; }
+        .action-card.overdue { border-left-color: var(--red); }
+        .action-card.due-soon { border-left-color: var(--yellow); }
+        .action-info { flex: 1; }
+        .action-type { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.2rem; }
+        .action-title { font-weight: 600; font-size: 1rem; }
+        .action-title a { color: var(--text); text-decoration: none; }
+        .action-title a:hover { text-decoration: underline; }
+        .action-meta { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem; }
+        .action-guidance { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; font-style: italic; }
+        .action-badge { padding: 0.2rem 0.6rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+        .badge-overdue { background: #fee2e2; color: #991b1b; }
+        .badge-due { background: #fef3c7; color: #92400e; }
+        .badge-ok { background: #d1fae5; color: #065f46; }
+        .empty { text-align: center; padding: 3rem; color: var(--text-muted); }
+        .summary { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .summary-card { background: var(--card-bg); border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); flex: 1; min-width: 150px; text-align: center; }
+        .summary-num { font-size: 2rem; font-weight: 700; }
+        .summary-label { font-size: 0.85rem; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚡ Prochaines actions</h1>
+        <a href="/">← Retour aux offres</a>
+    </div>
+    <div class="container">
+        <div class="summary">
+            <div class="summary-card">
+                <div class="summary-num">{{ actions|length }}</div>
+                <div class="summary-label">Actions totales</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-num" style="color: var(--red)">{{ overdue }}</div>
+                <div class="summary-label">En retard</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-num" style="color: var(--yellow)">{{ due_soon }}</div>
+                <div class="summary-label">À faire bientôt</div>
+            </div>
+        </div>
+
+        {% if actions %}
+        {% for action in actions %}
+        <div class="action-card {{ 'overdue' if action.due_date and action.due_date < today else ('due-soon' if action.due_date else '') }}">
+            <div class="action-info">
+                <div class="action-type">{{ action.action }}</div>
+                <div class="action-title">
+                    <a href="/offer/{{ action.offer_id }}">{{ action.title }}</a>
+                    — {{ action.company }}
+                </div>
+                {% if action.due_date %}
+                <div class="action-meta">📅 {{ action.due_date }}{% if action.due_date < today %} ⚠️ En retard{% endif %}</div>
+                {% endif %}
+                <div class="action-guidance">{{ action.guidance }}</div>
+            </div>
+            <span class="action-badge {{ 'badge-overdue' if action.due_date and action.due_date < today else ('badge-due' if action.due_date else 'badge-ok') }}">
+                {% if action.due_date and action.due_date < today %}Retard{% elif action.due_date %}Bientôt{% else %}À faire{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty">
+            <p>🎉 Aucune action en attente !</p>
+            <p style="margin-top:0.5rem;font-size:0.85rem">Tout est à jour.</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
