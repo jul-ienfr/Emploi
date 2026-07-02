@@ -384,6 +384,131 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Compare offers ──────────────────────────────────────────────────
+
+    @app.route("/compare")
+    def compare_page():
+        ids_str = request.args.get("ids", "")
+        ids = [int(x) for x in ids_str.split(",") if x.strip().isdigit()]
+        if not ids:
+            return render_template("error.html", code=400, message="Aucune offre sélectionnée")
+        conn = _get_db()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            offers = conn.execute(
+                f"SELECT * FROM offers WHERE id IN ({placeholders}) ORDER BY score DESC",
+                ids,
+            ).fetchall()
+            return render_template("compare.html", offers=offers)
+        finally:
+            conn.close()
+
+    @app.route("/api/compare")
+    def api_compare():
+        ids_str = request.args.get("ids", "")
+        ids = [int(x) for x in ids_str.split(",") if x.strip().isdigit()]
+        if not ids:
+            return jsonify({"error": "ids required"}), 400
+        conn = _get_db()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            offers = conn.execute(
+                f"SELECT * FROM offers WHERE id IN ({placeholders}) ORDER BY score DESC",
+                ids,
+            ).fetchall()
+            return jsonify([dict(row) for row in offers])
+        finally:
+            conn.close()
+
+    # ── Bookmarks and tags ──────────────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/bookmark", methods=["POST"])
+    def api_toggle_bookmark(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS offer_bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            existing = conn.execute("SELECT id FROM offer_bookmarks WHERE offer_id = ?", (offer_id,)).fetchone()
+            if existing:
+                conn.execute("DELETE FROM offer_bookmarks WHERE offer_id = ?", (offer_id,))
+                conn.commit()
+                return jsonify({"ok": True, "bookmarked": False})
+            else:
+                conn.execute("INSERT INTO offer_bookmarks (offer_id) VALUES (?)", (offer_id,))
+                conn.commit()
+                return jsonify({"ok": True, "bookmarked": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/bookmarks")
+    def api_bookmarks():
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                "SELECT o.* FROM offers o JOIN offer_bookmarks b ON o.id = b.offer_id " "ORDER BY b.created_at DESC"
+            ).fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/tags", methods=["POST"])
+    def api_set_tags(offer_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        tags = data.get("tags", [])
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS offer_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER NOT NULL,
+                    tag TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id),
+                    UNIQUE(offer_id, tag)
+                )"""
+            )
+            conn.execute("DELETE FROM offer_tags WHERE offer_id = ?", (offer_id,))
+            for tag in tags:
+                tag = str(tag).strip().lower()
+                if tag:
+                    conn.execute(
+                        "INSERT INTO offer_tags (offer_id, tag) VALUES (?, ?)",
+                        (offer_id, tag),
+                    )
+            conn.commit()
+            return jsonify({"ok": True, "tags": tags})
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/tags")
+    def api_get_tags(offer_id):
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                "SELECT tag FROM offer_tags WHERE offer_id = ? ORDER BY tag",
+                (offer_id,),
+            ).fetchall()
+            return jsonify([row["tag"] for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/api/tags")
+    def api_all_tags():
+        conn = _get_db()
+        try:
+            rows = conn.execute("SELECT tag, COUNT(*) as cnt FROM offer_tags GROUP BY tag ORDER BY cnt DESC").fetchall()
+            return jsonify([{"tag": row["tag"], "count": row["cnt"]} for row in rows])
+        finally:
+            conn.close()
+
     # ── Batch operations ────────────────────────────────────────────────
 
     @app.route("/api/offers/batch/status", methods=["POST"])

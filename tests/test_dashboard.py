@@ -431,3 +431,94 @@ def test_batch_archive(tmp_path, monkeypatch):
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["ok"] is True
+
+
+# ── Bookmarks and tags ──────────────────────────────────────────────────────
+
+
+def test_toggle_bookmark(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(f"/api/offer/{oid}/bookmark", content_type="application/json")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["bookmarked"] is True
+        # Toggle again
+        resp2 = client.post(f"/api/offer/{oid}/bookmark", content_type="application/json")
+        data2 = json.loads(resp2.data)
+        assert data2["bookmarked"] is False
+
+
+def test_list_bookmarks(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Bookmarked", company="Co", location="X")
+    with _get_app().test_client() as client:
+        client.post(f"/api/offer/{oid}/bookmark", content_type="application/json")
+        resp = client.get("/api/bookmarks")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert len(data) == 1
+        assert data[0]["title"] == "Bookmarked"
+
+
+def test_set_and_get_tags(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/offer/{oid}/tags",
+            json={"tags": ["python", "urgent"]},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        resp2 = client.get(f"/api/offer/{oid}/tags")
+        tags = json.loads(resp2.data)
+        assert "python" in tags
+        assert "urgent" in tags
+
+
+def test_all_tags(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        client.post(
+            f"/api/offer/{oid}/tags",
+            json={"tags": ["python"]},
+            content_type="application/json",
+        )
+        resp = client.get("/api/tags")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert len(data) >= 1
+
+
+# ── Compare ─────────────────────────────────────────────────────────────────
+
+
+def test_compare_page(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        id1 = add_offer(conn, title="A", company="Co1", location="X", description="Desc A")
+        id2 = add_offer(conn, title="B", company="Co2", location="Y", description="Desc B")
+    with _get_app().test_client() as client:
+        resp = client.get(f"/compare?ids={id1},{id2}")
+        assert resp.status_code == 200
+        assert b"A" in resp.data
+        assert b"B" in resp.data
+
+
+def test_compare_api(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        id1 = add_offer(conn, title="A", company="Co", location="X")
+        id2 = add_offer(conn, title="B", company="Co", location="Y")
+    with _get_app().test_client() as client:
+        resp = client.get(f"/api/compare?ids={id1},{id2}")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert len(data) == 2
