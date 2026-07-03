@@ -23,7 +23,9 @@ def _get_auth_password() -> str | None:
     return os.environ.get("EMPLOI_DASHBOARD_AUTH", "").strip() or None
 
 
-def _check_rate_limit(ip: str) -> bool:
+def _check_rate_limit(ip: str | None) -> bool:
+    if not ip:
+        return True
     now = time.time()
     if ip not in _rate_limits:
         _rate_limits[ip] = []
@@ -59,7 +61,7 @@ def check_auth(f):
         # Check basic auth
         if auth_password:
             auth = request.authorization
-            if auth and hmac.compare_digest(auth.password, auth_password):
+            if auth and auth.password and hmac.compare_digest(auth.password, auth_password):
                 return f(*args, **kwargs)
 
         logger.warning("Unauthorized access attempt from %s", request.remote_addr)
@@ -102,7 +104,7 @@ def setup_auth(app):
         # Check basic auth
         if auth_password:
             auth = request.authorization
-            if auth and hmac.compare_digest(auth.password, auth_password):
+            if auth and auth.password and hmac.compare_digest(auth.password, auth_password):
                 return
 
         logger.warning("Unauthorized access attempt from %s to %s", request.remote_addr, request.path)

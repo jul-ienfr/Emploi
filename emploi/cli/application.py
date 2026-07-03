@@ -171,8 +171,8 @@ def application_pipeline(
             existing_sent = None
             if should_schedule_followup:
                 delay_days = (
-                    normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])
-                )  # type: ignore[call-overload]
+                    normalize_followup_delay(followup_after) if followup_after else int(auto_followup["delay_days"])  # type: ignore[call-overload]
+                )
                 followup_date = _followup_date_from_delay(delay_days=delay_days, today=today)
                 if not dry_run:
                     existing_sent = conn.execute(

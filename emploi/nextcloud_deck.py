@@ -44,12 +44,12 @@ class NextcloudDeckClient:
         if not self.base_url or self.board_id <= 0:
             raise ValueError("Endpoint Deck incomplet")
 
-    @with_retry(
+    @with_retry(  # type: ignore[misc,arg-type]
         max_retries=3,
         base_delay=1.0,
         max_delay=15.0,
         retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError),
-    )  # type: ignore[misc, arg-type]
+    )
     def _request_json(self, method: str, path: str, payload: dict[str, object]) -> dict[str, object]:
         url = f"{self.base_url}{self.api_base_path}/boards/{self.board_id}{path}"
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")

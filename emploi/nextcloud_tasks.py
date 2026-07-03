@@ -55,12 +55,12 @@ class NextcloudTasksClient:
         encoded_calendar = urllib.parse.quote(self.calendar, safe="")
         return f"{self.base_url}{self.caldav_base_path}/{encoded_user}/{encoded_calendar}"
 
-    @with_retry(
+    @with_retry(  # type: ignore[misc,arg-type]
         max_retries=3,
         base_delay=1.0,
         max_delay=15.0,
         retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError),
-    )  # type: ignore[misc, arg-type]
+    )
     def _request(
         self, method: str, url: str, data: bytes = b"", content_type: str = "text/calendar; charset=utf-8"
     ) -> bytes:

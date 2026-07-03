@@ -1360,8 +1360,8 @@ def create_app() -> object:
 
             actions = list_next_actions(conn)
             today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
-            overdue = sum(1 for a in actions if a.get("due_date") and a["due_date"] < today)
-            due_soon = sum(1 for a in actions if a.get("due_date") and a["due_date"] >= today)
+            overdue = sum(1 for a in actions if a.get("due_date") and str(a["due_date"]) < today)
+            due_soon = sum(1 for a in actions if a.get("due_date") and str(a["due_date"]) >= today)
             return render_template(
                 "actions.html",
                 actions=actions,
@@ -1395,7 +1395,7 @@ def create_app() -> object:
             for row in rows:
                 s = row["status"]
                 if s in status_map:
-                    status_map[s]["offers"].append(row)
+                    status_map[s]["offers"].append(row)  # type: ignore[attr-defined]
             return render_template("applications.html", columns=columns)
         finally:
             conn.close()
@@ -2593,4 +2593,4 @@ def run_dashboard(host: str = "0.0.0.0", port: int = 8050) -> None:
     """Start the dashboard server."""
     app = create_app()
     logger.info("Dashboard starting on http://%s:%d", host, port)
-    app.run(host=host, port=port, debug=False)
+    app.run(host=host, port=port, debug=False)  # type: ignore[attr-defined]

@@ -70,12 +70,12 @@ class NextcloudWebDAVClient:
         path = path.strip("/")
         return self.root_url if not path else f"{self.root_url}/{urllib.parse.quote(path, safe='/') }"
 
-    @with_retry(
+    @with_retry(  # type: ignore[misc,arg-type]
         max_retries=3,
         base_delay=1.0,
         max_delay=15.0,
         retryable_exceptions=(urllib.error.URLError, ConnectionError, OSError),
-    )  # type: ignore[misc, arg-type]
+    )
     def _request(self, method: str, remote_path: str, *, data: bytes | None = None, content_type: str = "") -> None:
         url = self._url_for(remote_path)
         request = urllib.request.Request(url, data=data, method=method)

@@ -44,7 +44,7 @@ def _build_search_url(query: str, location: str = "", page: int = 1) -> str:
     return f"{APEC_API_URL}?{urllib.parse.urlencode(params)}"
 
 
-@with_retry(max_retries=2, base_delay=1.0, retryable_exceptions=(urllib.error.URLError, OSError))
+@with_retry(max_retries=2, base_delay=1.0, retryable_exceptions=(urllib.error.URLError, OSError))  # type: ignore[arg-type,misc]
 def _fetch_html(url: str) -> str:
     req = urllib.request.Request(
         url,
@@ -114,7 +114,7 @@ def search_apec(
     while len(all_offers) < max_results:
         url = _build_search_url(query, location, page)
         try:
-            html = _fetch_html(url)
+            html = _fetch_html(url)  # type: ignore[misc]
         except Exception as exc:
             logger.warning("APEC search failed (page %d): %s", page, exc)
             break
