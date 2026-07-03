@@ -10,6 +10,7 @@ Requires Flask: pip install flask
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -72,7 +73,10 @@ def create_app() -> object:
     @app.after_request
     def _set_security_headers(response):
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:;"
+            "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com;"
+            " img-src 'self' data: https://*.tile.openstreetmap.org;"
+            " font-src 'self' https://cdn.jsdelivr.net https://unpkg.com;"
+            " connect-src 'self';"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -464,6 +468,298 @@ def create_app() -> object:
             return jsonify({"ok": True, "stale_days": stale_days})
         finally:
             conn.close()
+
+    # ── Rémunération totale ─────────────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/compensation", methods=["GET", "PUT"])
+    def api_compensation(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS offer_compensation (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    salary_brut REAL DEFAULT 0,
+                    bonus REAL DEFAULT 0,
+                    benefits_json TEXT DEFAULT '{}',
+                    total_annual REAL DEFAULT 0,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            if request.method == "GET":
+                row = conn.execute("SELECT * FROM offer_compensation WHERE offer_id = ?", (offer_id,)).fetchone()
+                return jsonify(dict(row) if row else {"offer_id": offer_id, "total_annual": 0})
+            else:
+                data = request.get_json(force=True)
+                salary = float(data.get("salary_brut", 0))
+                bonus = float(data.get("bonus", 0))
+                benefits = float(data.get("benefits", 0))
+                total = salary + bonus + benefits
+                conn.execute(
+                    """INSERT INTO offer_compensation (offer_id, salary_brut, bonus, benefits_json, total_annual)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(offer_id) DO UPDATE SET
+                        salary_brut=excluded.salary_brut, bonus=excluded.bonus,
+                        benefits_json=excluded.benefits_json, total_annual=excluded.total_annual,
+                        updated_at=CURRENT_TIMESTAMP""",
+                    (offer_id, salary, bonus, json.dumps(data.get("benefits", {})), total),
+                )
+                conn.commit()
+                return jsonify({"ok": True, "total_annual": total})
+        finally:
+            conn.close()
+
+    # ── City comparison ─────────────────────────────────────────────────
+
+    @app.route("/api/cities/compare")
+    def api_cities_compare():
+        cities_str = request.args.get("cities", "")
+        cities = [c.strip() for c in cities_str.split(",") if c.strip()]
+        if not cities:
+            return jsonify({"error": "cities required"}), 400
+        conn = _get_db()
+        try:
+            results = {}
+            for city in cities:
+                row = conn.execute(
+                    "SELECT COUNT(*) as offers, AVG(score) as avg_score FROM offers "
+                    "WHERE is_active = 1 AND location LIKE ?",
+                    (f"%{city}%",),
+                ).fetchone()
+                results[city] = {
+                    "offers": row["offers"],
+                    "avg_score": round(row["avg_score"] or 0, 1),
+                }
+            return jsonify(results)
+        finally:
+            conn.close()
+
+    # ── Share offers ────────────────────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/share")
+    def api_share_offer(offer_id):
+        import hashlib
+
+        token = hashlib.sha1(f"{offer_id}-share".encode()).hexdigest()[:12]
+        url = f"/share/{token}"
+        return jsonify({"ok": True, "url": url, "token": token})
+
+    @app.route("/share/<token>")
+    def share_public(token):
+        # Simple share page — reads offer_id from token (reverse lookup)
+        conn = _get_db()
+        try:
+            offers = conn.execute("SELECT * FROM offers WHERE is_active = 1 ORDER BY score DESC LIMIT 50").fetchall()
+            # For simplicity, show first offer matching token hash
+            for o in offers:
+                expected = hashlib.sha1(f"{o['id']}-share".encode()).hexdigest()[:12]
+                if expected == token:
+                    return render_template("offer.html", offer=o, events=[], notes=[])
+            return render_template("error.html", code=404, message="Offre introuvable")
+        finally:
+            conn.close()
+
+    # ── Duplicate detection ─────────────────────────────────────────────
+
+    @app.route("/api/offers/duplicates")
+    def api_duplicates():
+        conn = _get_db()
+        try:
+            # Find offers with similar titles from different sources
+            rows = conn.execute(
+                """SELECT a.id as id_a, a.title as title_a, a.company as company_a,
+                          b.id as id_b, b.title as title_b, b.company as company_b
+                FROM offers a JOIN offers b ON a.id < b.id
+                WHERE a.is_active = 1 AND b.is_active = 1
+                AND a.company = b.company AND a.title != b.title
+                AND (a.location = b.location OR a.location = '' OR b.location = '')
+                LIMIT 50"""
+            ).fetchall()
+            return jsonify([dict(r) for r in rows])
+        finally:
+            conn.close()
+
+    # ── Credibility score ───────────────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/credibility")
+    def api_credibility(offer_id):
+        conn = _get_db()
+        try:
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if not offer:
+                return jsonify({"error": "Not found"}), 404
+            score = 50
+            reasons = []
+            if offer["company"]:
+                score += 10
+                reasons.append("Entreprise renseignée (+10)")
+            if offer["description"] and len(offer["description"]) > 100:
+                score += 10
+                reasons.append("Description détaillée (+10)")
+            if offer["salary"]:
+                score += 10
+                reasons.append("Salaire indiqué (+10)")
+            if offer["url"] and offer["url"].startswith("http"):
+                score += 5
+                reasons.append("URL valide (+5)")
+            if not offer["company"]:
+                score -= 15
+                reasons.append("Pas d'entreprise (-15)")
+            if offer["description"] and len(offer["description"]) < 50:
+                score -= 10
+                reasons.append("Description trop courte (-10)")
+            score = max(0, min(100, score))
+            return jsonify({"score": score, "reasons": reasons})
+        finally:
+            conn.close()
+
+    # ── Personal goals ──────────────────────────────────────────────────
+
+    @app.route("/api/goals", methods=["GET", "POST"])
+    def api_goals():
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    target_value INTEGER DEFAULT 1,
+                    current_value INTEGER DEFAULT 0,
+                    period TEXT DEFAULT 'weekly',
+                    completed_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            if request.method == "GET":
+                rows = conn.execute("SELECT * FROM goals ORDER BY created_at DESC").fetchall()
+                return jsonify([dict(r) for r in rows])
+            else:
+                data = request.get_json(force=True)
+                conn.execute(
+                    "INSERT INTO goals (title, target_value, period) VALUES (?, ?, ?)",
+                    (data.get("title", ""), data.get("target_value", 1), data.get("period", "weekly")),
+                )
+                conn.commit()
+                return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── Semantic search (basic) ─────────────────────────────────────────
+
+    @app.route("/api/search/semantic")
+    def api_semantic_search():
+        q = request.args.get("q", "").strip()
+        if not q:
+            return jsonify([])
+        # Basic synonym expansion
+        synonyms = {
+            "dev": ["développeur", "developer", "engineer"],
+            "python": ["python", "django", "flask"],
+            "support": ["support", "helpdesk", "assistance"],
+            "admin": ["administrateur", "sysadmin", "infrastructure"],
+        }
+        terms = [q]
+        for key, syns in synonyms.items():
+            if key in q.lower():
+                terms.extend(syns)
+        conn = _get_db()
+        try:
+            conditions = []
+            params = []
+            for term in set(terms):
+                conditions.append("(title LIKE ? OR description LIKE ?)")
+                params.extend([f"%{term}%", f"%{term}%"])
+            where = "WHERE is_active = 1 AND (" + " OR ".join(conditions) + ")"
+            rows = conn.execute(f"SELECT * FROM offers {where} ORDER BY score DESC LIMIT 50", params).fetchall()
+            return jsonify([dict(r) for r in rows])
+        finally:
+            conn.close()
+
+    # ── Translation (stub) ─────────────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/translate", methods=["POST"])
+    def api_translate(offer_id):
+        data = request.get_json(force=True)
+        text = data.get("text", "")
+        target_lang = data.get("lang", "fr")
+        # Stub: return original text (real translation needs API key)
+        return jsonify({"ok": True, "translated": text, "lang": target_lang})
+
+    # ── Alert creation ──────────────────────────────────────────────────
+
+    @app.route("/api/alerts", methods=["GET", "POST", "DELETE"])
+    def api_alerts():
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query TEXT NOT NULL,
+                    min_score INTEGER DEFAULT 0,
+                    location TEXT DEFAULT '',
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            if request.method == "GET":
+                rows = conn.execute("SELECT * FROM alerts ORDER BY created_at DESC").fetchall()
+                return jsonify([dict(r) for r in rows])
+            elif request.method == "DELETE":
+                alert_id = request.args.get("id", "").strip()
+                if alert_id:
+                    conn.execute("DELETE FROM alerts WHERE id = ?", (int(alert_id),))
+                    conn.commit()
+                return jsonify({"ok": True})
+            else:
+                data = request.get_json(force=True)
+                conn.execute(
+                    "INSERT INTO alerts (query, min_score, location) VALUES (?, ?, ?)",
+                    (data.get("query", ""), data.get("min_score", 0), data.get("location", "")),
+                )
+                conn.commit()
+                return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── Outgoing webhooks ───────────────────────────────────────────────
+
+    @app.route("/api/webhooks", methods=["GET", "POST"])
+    def api_webhooks():
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS webhooks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL,
+                    events_json TEXT DEFAULT '[]',
+                    active INTEGER DEFAULT 1,
+                    last_triggered TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            if request.method == "GET":
+                rows = conn.execute("SELECT * FROM webhooks ORDER BY created_at DESC").fetchall()
+                return jsonify([dict(r) for r in rows])
+            else:
+                data = request.get_json(force=True)
+                conn.execute(
+                    "INSERT INTO webhooks (url, events_json) VALUES (?, ?)",
+                    (data.get("url", ""), json.dumps(data.get("events", []))),
+                )
+                conn.commit()
+                return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── Import sources status ───────────────────────────────────────────
+
+    @app.route("/api/import-sources")
+    def api_import_sources():
+        from emploi.sources.aggregator import list_sources
+
+        sources = list_sources()
+        return jsonify(sources)
 
     # ── Search history ──────────────────────────────────────────────────
 
@@ -990,6 +1286,681 @@ def create_app() -> object:
                 return jsonify({"ok": True, "status": new_status})
             except ValueError as e:
                 return jsonify({"error": str(e)}), 400
+        finally:
+            conn.close()
+
+    # ── Phase 18: Geo map ───────────────────────────────────────────────
+
+    @app.route("/api/map-data")
+    def api_map_data():
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                "SELECT id, title, company, location, score, url, status "
+                "FROM offers WHERE is_active = 1 AND location != '' "
+                "ORDER BY score DESC"
+            ).fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/map")
+    def map_page():
+        return render_template("map.html")
+
+    # ── Phase 19: Company profiles ──────────────────────────────────────
+
+    @app.route("/api/companies")
+    def api_companies():
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                "SELECT company, COUNT(*) as offer_count, "
+                "AVG(score) as avg_score, "
+                "GROUP_CONCAT(DISTINCT location) as locations "
+                "FROM offers WHERE is_active = 1 AND company != '' "
+                "GROUP BY company ORDER BY offer_count DESC"
+            ).fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/company/<name>")
+    def company_page(name):
+        conn = _get_db()
+        try:
+            offers = conn.execute(
+                "SELECT * FROM offers WHERE company = ? AND is_active = 1 " "ORDER BY score DESC",
+                (name,),
+            ).fetchall()
+            if not offers:
+                from flask import abort
+
+                abort(404)
+            stats = conn.execute(
+                "SELECT COUNT(*) as count, AVG(score) as avg_score, "
+                "GROUP_CONCAT(DISTINCT location) as locations "
+                "FROM offers WHERE company = ? AND is_active = 1",
+                (name,),
+            ).fetchone()
+            # Check if followed
+            followed = False
+            try:
+                row = conn.execute("SELECT 1 FROM followed_companies WHERE name = ?", (name,)).fetchone()
+                followed = row is not None
+            except Exception:
+                pass
+            return render_template("company.html", company=name, offers=offers, stats=stats, followed=followed)
+        finally:
+            conn.close()
+
+    # ── Phase 29: Multi-user profiles ───────────────────────────────────
+
+    def _ensure_user_profiles(conn):
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS user_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                skills_json TEXT DEFAULT '[]',
+                preferences_json TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+
+    @app.route("/api/profiles/users", methods=["GET"])
+    def api_list_user_profiles():
+        conn = _get_db()
+        try:
+            _ensure_user_profiles(conn)
+            rows = conn.execute("SELECT * FROM user_profiles ORDER BY name").fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                d["skills"] = json.loads(d.pop("skills_json", "[]") or "[]")
+                d["preferences"] = json.loads(d.pop("preferences_json", "{}") or "{}")
+                result.append(d)
+            return jsonify(result)
+        finally:
+            conn.close()
+
+    @app.route("/api/profiles/users", methods=["POST"])
+    def api_create_user_profile():
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "name required"}), 400
+        skills = data.get("skills", [])
+        preferences = data.get("preferences", {})
+        conn = _get_db()
+        try:
+            _ensure_user_profiles(conn)
+            cur = conn.execute(
+                "INSERT INTO user_profiles (name, skills_json, preferences_json) VALUES (?, ?, ?)",
+                (name, json.dumps(skills), json.dumps(preferences)),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "id": cur.lastrowid, "name": name})
+        finally:
+            conn.close()
+
+    @app.route("/api/profiles/users/<int:profile_id>", methods=["GET"])
+    def api_get_user_profile(profile_id):
+        conn = _get_db()
+        try:
+            _ensure_user_profiles(conn)
+            row = conn.execute("SELECT * FROM user_profiles WHERE id = ?", (profile_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "Profile not found"}), 404
+            d = dict(row)
+            d["skills"] = json.loads(d.pop("skills_json", "[]") or "[]")
+            d["preferences"] = json.loads(d.pop("preferences_json", "{}") or "{}")
+            return jsonify(d)
+        finally:
+            conn.close()
+
+    @app.route("/api/profiles/users/<int:profile_id>", methods=["PUT"])
+    def api_update_user_profile(profile_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        conn = _get_db()
+        try:
+            _ensure_user_profiles(conn)
+            row = conn.execute("SELECT * FROM user_profiles WHERE id = ?", (profile_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "Profile not found"}), 404
+            name = data.get("name", row["name"]).strip()
+            skills = data.get("skills", json.loads(row["skills_json"] or "[]"))
+            preferences = data.get("preferences", json.loads(row["preferences_json"] or "{}"))
+            conn.execute(
+                "UPDATE user_profiles SET name = ?, skills_json = ?, preferences_json = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (name, json.dumps(skills), json.dumps(preferences), profile_id),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "id": profile_id, "name": name})
+        finally:
+            conn.close()
+
+    @app.route("/api/profiles/users/<int:profile_id>", methods=["DELETE"])
+    def api_delete_user_profile(profile_id):
+        conn = _get_db()
+        try:
+            _ensure_user_profiles(conn)
+            row = conn.execute("SELECT id FROM user_profiles WHERE id = ?", (profile_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "Profile not found"}), 404
+            conn.execute("DELETE FROM user_profiles WHERE id = ?", (profile_id,))
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── Phase 30: Advanced analytics ────────────────────────────────────
+
+    @app.route("/api/analytics/conversion")
+    def api_analytics_conversion():
+        conn = _get_db()
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM offers WHERE is_active = 1").fetchone()[0]
+            bookmarked = 0
+            try:
+                bookmarked = conn.execute("SELECT COUNT(DISTINCT offer_id) FROM offer_bookmarks").fetchone()[0]
+            except Exception:
+                pass
+            # Applications as "applied" stage
+            applied = 0
+            try:
+                applied = conn.execute("SELECT COUNT(DISTINCT offer_id) FROM applications").fetchone()[0]
+            except Exception:
+                pass
+            interview = 0
+            try:
+                interview = conn.execute(
+                    "SELECT COUNT(DISTINCT offer_id) FROM applications WHERE status = 'interview'"
+                ).fetchone()[0]
+            except Exception:
+                pass
+            return jsonify(
+                {
+                    "discovered": total,
+                    "bookmarked": bookmarked,
+                    "applied": applied,
+                    "interview": interview,
+                }
+            )
+        finally:
+            conn.close()
+
+    @app.route("/api/analytics/source-roi")
+    def api_analytics_source_roi():
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                "SELECT COALESCE(NULLIF(external_source,''), source) as src, "
+                "COUNT(*) as total, AVG(score) as avg_score, "
+                "SUM(CASE WHEN status = 'interesting' OR status = 'applied' THEN 1 ELSE 0 END) as engaged "
+                "FROM offers WHERE is_active = 1 AND COALESCE(NULLIF(external_source,''), source) != '' "
+                "GROUP BY src ORDER BY total DESC"
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                total = d["total"]
+                d["engagement_rate"] = round(d["engaged"] / total * 100, 1) if total else 0
+                result.append(d)
+            return jsonify(result)
+        finally:
+            conn.close()
+
+    # ── Phase 40: Company following ─────────────────────────────────────
+
+    def _ensure_followed_companies(conn):
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS followed_companies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                followed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+
+    @app.route("/api/company/<name>/follow", methods=["POST"])
+    def api_follow_company(name):
+        conn = _get_db()
+        try:
+            _ensure_followed_companies(conn)
+            existing = conn.execute("SELECT id FROM followed_companies WHERE name = ?", (name,)).fetchone()
+            if existing:
+                return jsonify({"ok": True, "followed": True, "already": True})
+            conn.execute("INSERT INTO followed_companies (name) VALUES (?)", (name,))
+            conn.commit()
+            return jsonify({"ok": True, "followed": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/company/<name>/follow", methods=["DELETE"])
+    def api_unfollow_company(name):
+        conn = _get_db()
+        try:
+            _ensure_followed_companies(conn)
+            conn.execute("DELETE FROM followed_companies WHERE name = ?", (name,))
+            conn.commit()
+            return jsonify({"ok": True, "followed": False})
+        finally:
+            conn.close()
+
+    @app.route("/api/companies/followed")
+    def api_followed_companies():
+        conn = _get_db()
+        try:
+            _ensure_followed_companies(conn)
+            rows = conn.execute("SELECT name, followed_at FROM followed_companies ORDER BY followed_at DESC").fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    # ── Phase 23: Clipboard import ────────────────────────────────────────
+
+    @app.route("/api/import/clipboard", methods=["POST"])
+    def api_import_clipboard():
+        data = request.get_json(force=True)
+        text = data.get("text", "").strip()
+        if not text:
+            return jsonify({"error": "text required"}), 400
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        title = ""
+        company = ""
+        location = ""
+        description = ""
+
+        if lines:
+            title = lines[0]
+        if len(lines) > 1:
+            company = lines[1]
+        if len(lines) > 2:
+            location = lines[2]
+        if len(lines) > 3:
+            description = "\n".join(lines[3:])
+
+        conn = _get_db()
+        try:
+            from emploi.db import add_offer
+
+            offer_id = add_offer(
+                conn,
+                title=title,
+                company=company,
+                location=location,
+                description=description,
+                source="clipboard",
+            )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "offer_id": offer_id,
+                    "parsed": {
+                        "title": title,
+                        "company": company,
+                        "location": location,
+                        "description": description,
+                    },
+                }
+            )
+        finally:
+            conn.close()
+
+    # ── Phase 26: Cover letter generation ─────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/cover-letter", methods=["POST"])
+    def api_cover_letter(offer_id):
+        conn = _get_db()
+        try:
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if offer is None:
+                return jsonify({"error": "Offer not found"}), 404
+
+            data = request.get_json(force=True) if request.data else {}
+            sender_name = data.get("sender_name", "[Votre nom]")
+            sender_email = data.get("sender_email", "[votre.email@example.com]")
+
+            cover_letter = (
+                f"Objet : Candidature au poste de {offer['title']}\n\n"
+                f"{sender_name}\n"
+                f"{sender_email}\n\n"
+                f"{datetime.now().strftime('%d/%m/%Y')}\n\n"
+                f"{offer['company']}\n"
+                f"{offer['location']}\n\n"
+                f"Madame, Monsieur,\n\n"
+                f"Je me permets de vous adresser ma candidature pour le poste de "
+                f"{offer['title']} au sein de {offer['company']}, situé à {offer['location']}.\n\n"
+                f"[Décrivez votre parcours et vos compétences pertinentes ici]\n\n"
+                f"[Mettez en avant vos réalisations clés et votre motivation pour ce poste]\n\n"
+                f"Je serais ravi(e) de pouvoir échanger avec vous lors d'un entretien afin de "
+                f"vous exposer plus en détail mes motivations.\n\n"
+                f"Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.\n\n"
+                f"{sender_name}"
+            )
+
+            return jsonify({"ok": True, "cover_letter": cover_letter})
+        finally:
+            conn.close()
+
+    # ── Phase 37: Contract analysis ───────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/contract/analyze", methods=["POST"])
+    def api_contract_analyze(offer_id):
+        conn = _get_db()
+        try:
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if offer is None:
+                return jsonify({"error": "Offer not found"}), 404
+
+            data = request.get_json(force=True)
+            contract_text = data.get("text", "").strip()
+            if not contract_text:
+                return jsonify({"error": "text required"}), 400
+
+            import re
+
+            clauses = {}
+
+            # Trial period
+            trial_match = re.search(
+                r"(?:p[ée]riode|essai)\s+d['’]essai\s*[:\s]*(\d+)\s*(mois|jours?|semaines?)",
+                contract_text,
+                re.IGNORECASE,
+            )
+            if trial_match:
+                clauses["trial_period"] = f"{trial_match.group(1)} {trial_match.group(2)}"
+            else:
+                trial_match2 = re.search(
+                    r"essai\s*(?:de\s*)?(\d+)\s*(mois|jours?|semaines?)",
+                    contract_text,
+                    re.IGNORECASE,
+                )
+                if trial_match2:
+                    clauses["trial_period"] = f"{trial_match2.group(1)} {trial_match2.group(2)}"
+
+            # Salary
+            salary_match = re.search(
+                r"(?:salaire|r[ée]mun[ée]ration)\s*[:\s]*(\d[\d\s,.]*)\s*(?:euros?|€|EUR|brut|net)",
+                contract_text,
+                re.IGNORECASE,
+            )
+            if salary_match:
+                clauses["salary"] = salary_match.group(0).strip()
+
+            # Non-compete
+            noncompete_match = re.search(
+                r"(?:clause|engagement)\s+(?:de\s+)?non[\s-]*concurrence\s*(?:pendant\s+)?(\d+)\s*(mois|ann[ée]es?)?",
+                contract_text,
+                re.IGNORECASE,
+            )
+            if noncompete_match:
+                clauses["non_compete"] = noncompete_match.group(0).strip()
+
+            if "non-concurrence" in contract_text.lower() and "non_compete" not in clauses:
+                clauses["non_compete"] = "Clause de non-concurrence présente"
+
+            return jsonify({"ok": True, "clauses": clauses})
+        finally:
+            conn.close()
+
+    # ── Phase 41: Multi-format import ─────────────────────────────────────
+
+    @app.route("/api/import/url", methods=["POST"])
+    def api_import_url():
+        data = request.get_json(force=True)
+        url = data.get("url", "").strip()
+        if not url:
+            return jsonify({"error": "url required"}), 400
+
+        import re
+
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+        except Exception as e:
+            return jsonify({"error": f"Failed to fetch URL: {e}"}), 400
+
+        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = text.strip()
+
+        title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else url
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        company = ""
+        location = ""
+        description = ""
+
+        for line in lines[:20]:
+            if re.search(r"(?:entreprise|soci[ée]t[ée]|company)", line, re.IGNORECASE):
+                company = re.sub(
+                    r"(?:entreprise|soci[ée]t[ée]|company)\s*[:\s]*", "", line, flags=re.IGNORECASE
+                ).strip()
+            if re.search(r"(?:lieu|location|ville|adresse)", line, re.IGNORECASE):
+                location = re.sub(r"(?:lieu|location|ville|adresse)\s*[:\s]*", "", line, flags=re.IGNORECASE).strip()
+
+        if not company and len(lines) > 1:
+            company = lines[1]
+        if not location and len(lines) > 2:
+            location = lines[2]
+        if len(lines) > 3:
+            description = "\n".join(lines[:30])
+
+        conn = _get_db()
+        try:
+            from emploi.db import add_offer
+
+            offer_id = add_offer(
+                conn,
+                title=title,
+                company=company,
+                location=location,
+                description=description,
+                url=url,
+                source="url_import",
+            )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "offer_id": offer_id,
+                    "parsed": {
+                        "title": title,
+                        "company": company,
+                        "location": location,
+                        "description": description[:200] + "..." if len(description) > 200 else description,
+                    },
+                }
+            )
+        finally:
+            conn.close()
+
+    @app.route("/api/import/text", methods=["POST"])
+    def api_import_text():
+        data = request.get_json(force=True)
+        text = data.get("text", "").strip()
+        if not text:
+            return jsonify({"error": "text required"}), 400
+
+        import re
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        title = ""
+        company = ""
+        location = ""
+        description = ""
+        salary = ""
+        contract_type = ""
+
+        for line in lines:
+            lower = line.lower()
+            if re.match(r"^(?:titre|title|intitul[ée])\s*[:\s]+", lower):
+                title = re.sub(r"^(?:titre|title|intitul[ée])\s*[:\s]+", "", line, flags=re.IGNORECASE).strip()
+            elif re.match(r"^(?:entreprise|soci[ée]t[ée]|company)\s*[:\s]+", lower):
+                company = re.sub(
+                    r"^(?:entreprise|soci[ée]t[ée]|company)\s*[:\s]+", "", line, flags=re.IGNORECASE
+                ).strip()
+            elif re.match(r"^(?:lieu|location|ville|adresse)\s*[:\s]+", lower):
+                location = re.sub(r"^(?:lieu|location|ville|adresse)\s*[:\s]+", "", line, flags=re.IGNORECASE).strip()
+            elif re.match(r"^(?:salaire|r[ée]mun[ée]ration|salary)\s*[:\s]+", lower):
+                salary = re.sub(
+                    r"^(?:salaire|r[ée]mun[ée]ration|salary)\s*[:\s]+", "", line, flags=re.IGNORECASE
+                ).strip()
+            elif re.match(r"^(?:contrat|contract|type)\s*[:\s]+", lower):
+                contract_type = re.sub(r"^(?:contrat|contract|type)\s*[:\s]+", "", line, flags=re.IGNORECASE).strip()
+
+        if not title and lines:
+            title = lines[0]
+        if not company and len(lines) > 1:
+            company = lines[1]
+        if not location and len(lines) > 2:
+            location = lines[2]
+        if len(lines) > 3:
+            description = "\n".join(lines[3:])
+
+        conn = _get_db()
+        try:
+            from emploi.db import add_offer
+
+            offer_id = add_offer(
+                conn,
+                title=title,
+                company=company,
+                location=location,
+                description=description,
+                salary=salary,
+                contract_type=contract_type,
+                source="text_import",
+            )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "offer_id": offer_id,
+                    "parsed": {
+                        "title": title,
+                        "company": company,
+                        "location": location,
+                        "salary": salary,
+                        "contract_type": contract_type,
+                    },
+                }
+            )
+        finally:
+            conn.close()
+
+    # ── Phase 42: Assisted application wizard ─────────────────────────────
+
+    @app.route("/api/apply/<int:offer_id>/steps")
+    def api_apply_steps(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS apply_wizard (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER NOT NULL,
+                    step INTEGER NOT NULL,
+                    completed INTEGER DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id),
+                    UNIQUE(offer_id, step)
+                )"""
+            )
+
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if offer is None:
+                return jsonify({"error": "Offer not found"}), 404
+
+            steps = [
+                {"step": 1, "label": "Analyser l’offre", "description": "Lire et comprendre les exigences du poste"},
+                {"step": 2, "label": "Préparer le CV", "description": "Adapter le CV au poste visé"},
+                {"step": 3, "label": "Rédiger la lettre", "description": "Rédiger la lettre de motivation"},
+                {"step": 4, "label": "Vérifier le dossier", "description": "Relire et corriger les documents"},
+                {"step": 5, "label": "Postuler", "description": "Envoyer la candidature"},
+            ]
+
+            completed_rows = conn.execute(
+                "SELECT step, completed, notes FROM apply_wizard WHERE offer_id = ?",
+                (offer_id,),
+            ).fetchall()
+            completed_map = {
+                row["step"]: {"completed": bool(row["completed"]), "notes": row["notes"]} for row in completed_rows
+            }
+
+            for step in steps:
+                if step["step"] in completed_map:
+                    step["completed"] = completed_map[step["step"]]["completed"]
+                    step["notes"] = completed_map[step["step"]]["notes"]
+                else:
+                    step["completed"] = False
+                    step["notes"] = ""
+
+            return jsonify({"ok": True, "offer_id": offer_id, "steps": steps})
+        finally:
+            conn.close()
+
+    @app.route("/api/apply/<int:offer_id>/step/<int:n>", methods=["POST"])
+    def api_apply_step_complete(offer_id, n):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS apply_wizard (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER NOT NULL,
+                    step INTEGER NOT NULL,
+                    completed INTEGER DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id),
+                    UNIQUE(offer_id, step)
+                )"""
+            )
+
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if offer is None:
+                return jsonify({"error": "Offer not found"}), 404
+
+            if n < 1 or n > 5:
+                return jsonify({"error": "Step must be between 1 and 5"}), 400
+
+            data = request.get_json(force=True) if request.data else {}
+            notes = data.get("notes", "")
+            completed = data.get("completed", True)
+
+            conn.execute(
+                "INSERT INTO apply_wizard (offer_id, step, completed, notes) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(offer_id, step) DO UPDATE SET completed = ?, notes = ?",
+                (offer_id, n, int(completed), notes, int(completed), notes),
+            )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "offer_id": offer_id,
+                    "step": n,
+                    "completed": completed,
+                    "notes": notes,
+                }
+            )
         finally:
             conn.close()
 

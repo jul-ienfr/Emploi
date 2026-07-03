@@ -141,7 +141,9 @@ Array.from(document.querySelectorAll('li.result')).map(li => {
     value = result.payload.get("value") if isinstance(result.payload, dict) else None
     if not isinstance(value, list):
         nested = result.payload.get("result") if isinstance(result.payload, dict) else None
-        value = nested.get("value") if isinstance(nested, dict) else []
+        value = nested.get("value", []) if isinstance(nested, dict) else []
+    if value is None:
+        value = []
     offers: list[ExtractedOffer] = []
     for item in value:  # type: ignore[union-attr]
         if isinstance(item, dict):
