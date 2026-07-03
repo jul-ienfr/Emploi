@@ -1964,6 +1964,496 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # -- Phase 17: Skills matching + salary analysis + user profile ----
+
+    @app.route("/api/profile/skills", methods=["POST"])
+    def api_save_profile_skills():
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        skills = data.get("skills", [])
+        experience_years = data.get("experience_years", 0)
+        salary_min = data.get("salary_min")
+        salary_max = data.get("salary_max")
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS user_profile (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    skills_json TEXT DEFAULT '[]',
+                    experience_years INTEGER DEFAULT 0,
+                    salary_min INTEGER,
+                    salary_max INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            existing = conn.execute("SELECT id FROM user_profile LIMIT 1").fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE user_profile SET skills_json = ?, experience_years = ?, "
+                    "salary_min = ?, salary_max = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(skills), experience_years, salary_min, salary_max, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO user_profile (skills_json, experience_years, salary_min, salary_max) "
+                    "VALUES (?, ?, ?, ?)",
+                    (json.dumps(skills), experience_years, salary_min, salary_max),
+                )
+            conn.commit()
+            return jsonify({"ok": True, "skills": skills})
+        finally:
+            conn.close()
+
+    @app.route("/api/skill-match/<int:offer_id>")
+    def api_skill_match(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS user_profile (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    skills_json TEXT DEFAULT '[]',
+                    experience_years INTEGER DEFAULT 0,
+                    salary_min INTEGER,
+                    salary_max INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            offer = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+            if offer is None:
+                return jsonify({"error": "Offer not found"}), 404
+            profile = conn.execute("SELECT * FROM user_profile LIMIT 1").fetchone()
+            if profile is None:
+                return jsonify({"error": "No user profile set. POST /api/profile/skills first."}), 400
+            user_skills = json.loads(profile["skills_json"] or "[]")
+            description = (offer["description"] or "").lower()
+            title = (offer["title"] or "").lower()
+            offer_text = f"{title} {description}"
+            matched = [s for s in user_skills if s.lower() in offer_text]
+            missing = [s for s in user_skills if s.lower() not in offer_text]
+            all_skills_lower = {s.lower() for s in user_skills}
+            if all_skills_lower:
+                match_score = round(len(matched) / len(all_skills_lower) * 100)
+            else:
+                match_score = 0
+            return jsonify(
+                {
+                    "offer_id": offer_id,
+                    "match_score": match_score,
+                    "matched_skills": matched,
+                    "missing_skills": missing,
+                    "experience_years": profile["experience_years"],
+                }
+            )
+        finally:
+            conn.close()
+
+    @app.route("/api/salary-analysis")
+    def api_salary_analysis():
+        conn = _get_db()
+        try:
+            source = request.args.get("source", "").strip()
+            location = request.args.get("location", "").strip()
+            contract = request.args.get("contract", "").strip()
+
+            where = ["is_active = 1", "salary IS NOT NULL", "salary != ''"]
+            params: list = []
+            if source:
+                where.append("(external_source = ? OR source = ?)")
+                params.extend([source, source])
+            if location:
+                where.append("location LIKE ?")
+                params.append(f"%{location}%")
+            if contract:
+                where.append("contract_type = ?")
+                params.append(contract)
+            where_clause = "WHERE " + " AND ".join(where)
+
+            rows = conn.execute(
+                f"SELECT salary, location, contract_type, source, external_source " f"FROM offers {where_clause}",
+                params,
+            ).fetchall()
+
+            salaries = []
+            for row in rows:
+                try:
+                    s = row["salary"]
+                    if s and str(s).replace(".", "").replace("-", "").strip().isdigit():
+                        salaries.append(
+                            {
+                                "salary": float(s),
+                                "location": row["location"],
+                                "contract_type": row["contract_type"],
+                                "source": row["external_source"] or row["source"],
+                            }
+                        )
+                except (ValueError, TypeError):
+                    pass
+
+            if not salaries:
+                return jsonify({"count": 0, "avg": 0, "min": 0, "max": 0, "salaries": []})
+
+            values = [s["salary"] for s in salaries]
+            return jsonify(
+                {
+                    "count": len(values),
+                    "avg": round(sum(values) / len(values), 2),
+                    "min": min(values),
+                    "max": max(values),
+                    "salaries": salaries,
+                }
+            )
+        finally:
+            conn.close()
+
+    # -- Phase 36: Interview prep ----------------------------------------
+
+    @app.route("/api/offer/<int:offer_id>/interview", methods=["GET"])
+    def api_get_interview_prep(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS interview_prep (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    notes TEXT DEFAULT '',
+                    checklist_json TEXT DEFAULT '[]',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            row = conn.execute("SELECT * FROM interview_prep WHERE offer_id = ?", (offer_id,)).fetchone()
+            if row is None:
+                return jsonify({"offer_id": offer_id, "notes": "", "checklist": []})
+            return jsonify(
+                {
+                    "offer_id": offer_id,
+                    "notes": row["notes"],
+                    "checklist": json.loads(row["checklist_json"] or "[]"),
+                }
+            )
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/interview", methods=["PUT"])
+    def api_save_interview_prep(offer_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        notes = data.get("notes", "")
+        checklist = data.get(
+            "checklist",
+            [
+                {"text": "Relire l'annonce", "done": False},
+                {"text": "Preparer questions", "done": False},
+                {"text": "Verifier transport", "done": False},
+                {"text": "Imprimer CV", "done": False},
+            ],
+        )
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS interview_prep (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    notes TEXT DEFAULT '',
+                    checklist_json TEXT DEFAULT '[]',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            existing = conn.execute("SELECT id FROM interview_prep WHERE offer_id = ?", (offer_id,)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE interview_prep SET notes = ?, checklist_json = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE offer_id = ?",
+                    (notes, json.dumps(checklist), offer_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO interview_prep (offer_id, notes, checklist_json) VALUES (?, ?, ?)",
+                    (offer_id, notes, json.dumps(checklist)),
+                )
+            conn.commit()
+            return jsonify({"ok": True, "offer_id": offer_id})
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/interview", methods=["DELETE"])
+    def api_delete_interview_prep(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS interview_prep (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    notes TEXT DEFAULT '',
+                    checklist_json TEXT DEFAULT '[]',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            conn.execute("DELETE FROM interview_prep WHERE offer_id = ?", (offer_id,))
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # -- Phase 38: Follow-up timeline ------------------------------------
+
+    @app.route("/api/application/<int:app_id>/timeline")
+    def api_application_timeline(app_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS followups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    application_id INTEGER NOT NULL,
+                    type TEXT NOT NULL DEFAULT 'note',
+                    notes TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (application_id) REFERENCES applications(id)
+                )"""
+            )
+            rows = conn.execute(
+                "SELECT * FROM followups WHERE application_id = ? ORDER BY created_at DESC",
+                (app_id,),
+            ).fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/api/application/<int:app_id>/followup", methods=["POST"])
+    def api_add_followup(app_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        followup_type = data.get("type", "note").strip()
+        notes = data.get("notes", "").strip()
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS followups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    application_id INTEGER NOT NULL,
+                    type TEXT NOT NULL DEFAULT 'note',
+                    notes TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (application_id) REFERENCES applications(id)
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO followups (application_id, type, notes) VALUES (?, ?, ?)",
+                (app_id, followup_type, notes),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "application_id": app_id})
+        finally:
+            conn.close()
+
+    # -- Phase 39: Response rate analytics -------------------------------
+
+    @app.route("/api/analytics/response-rate")
+    def api_response_rate():
+        conn = _get_db()
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0]
+            responded = conn.execute(
+                "SELECT COUNT(*) FROM applications WHERE status NOT IN ('draft', 'sent')"
+            ).fetchone()[0]
+            interviews = conn.execute("SELECT COUNT(*) FROM applications WHERE status = 'interview'").fetchone()[0]
+            rejected = conn.execute("SELECT COUNT(*) FROM applications WHERE status = 'rejected'").fetchone()[0]
+            response_rate = round(responded / total * 100, 1) if total > 0 else 0
+            interview_rate = round(interviews / total * 100, 1) if total > 0 else 0
+            return jsonify(
+                {
+                    "total_applications": total,
+                    "responded": responded,
+                    "interviews": interviews,
+                    "rejected": rejected,
+                    "response_rate": response_rate,
+                    "interview_rate": interview_rate,
+                }
+            )
+        finally:
+            conn.close()
+
+    @app.route("/api/analytics/weekly")
+    def api_weekly_analytics():
+        conn = _get_db()
+        try:
+            weeks = []
+            for i in range(4):
+                weeks.append(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM applications "
+                        "WHERE applied_at >= date('now', ?) AND applied_at < date('now', ?)",
+                        (f"-{(i + 1) * 7} days", f"-{i * 7} days"),
+                    ).fetchone()[0]
+                )
+            new_offers = []
+            for i in range(4):
+                new_offers.append(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM offers "
+                        "WHERE created_at >= date('now', ?) AND created_at < date('now', ?)",
+                        (f"-{(i + 1) * 7} days", f"-{i * 7} days"),
+                    ).fetchone()[0]
+                )
+            return jsonify(
+                {
+                    "applications_per_week": list(reversed(weeks)),
+                    "new_offers_per_week": list(reversed(new_offers)),
+                }
+            )
+        finally:
+            conn.close()
+
+    # -- Phase 47: Smart reminders ---------------------------------------
+
+    @app.route("/api/reminders", methods=["GET"])
+    def api_list_reminders():
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER,
+                    title TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    type TEXT DEFAULT 'general',
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            rows = conn.execute("SELECT * FROM reminders ORDER BY remind_at ASC").fetchall()
+            return jsonify([dict(row) for row in rows])
+        finally:
+            conn.close()
+
+    @app.route("/api/reminders", methods=["POST"])
+    def api_create_reminder():
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        title = data.get("title", "").strip()
+        remind_at = data.get("remind_at", "").strip()
+        if not title or not remind_at:
+            return jsonify({"error": "title and remind_at required"}), 400
+        offer_id = data.get("offer_id")
+        reminder_type = data.get("type", "general")
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER,
+                    title TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    type TEXT DEFAULT 'general',
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            cursor = conn.execute(
+                "INSERT INTO reminders (offer_id, title, remind_at, type) VALUES (?, ?, ?, ?)",
+                (offer_id, title, remind_at, reminder_type),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "id": cursor.lastrowid})
+        finally:
+            conn.close()
+
+    @app.route("/api/reminders/<int:reminder_id>", methods=["GET"])
+    def api_get_reminder(reminder_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER,
+                    title TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    type TEXT DEFAULT 'general',
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            row = conn.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "Reminder not found"}), 404
+            return jsonify(dict(row))
+        finally:
+            conn.close()
+
+    @app.route("/api/reminders/<int:reminder_id>", methods=["PUT"])
+    def api_update_reminder(reminder_id):
+        from flask import request as req
+
+        data = req.get_json(force=True)
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER,
+                    title TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    type TEXT DEFAULT 'general',
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            row = conn.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "Reminder not found"}), 404
+            title = data.get("title", row["title"])
+            remind_at = data.get("remind_at", row["remind_at"])
+            completed = data.get("completed", row["completed"])
+            reminder_type = data.get("type", row["type"])
+            conn.execute(
+                "UPDATE reminders SET title = ?, remind_at = ?, completed = ?, type = ? WHERE id = ?",
+                (title, remind_at, completed, reminder_type, reminder_id),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/reminders/<int:reminder_id>", methods=["DELETE"])
+    def api_delete_reminder(reminder_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER,
+                    title TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    type TEXT DEFAULT 'general',
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            row = conn.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "Reminder not found"}), 404
+            conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
     return app
 
 

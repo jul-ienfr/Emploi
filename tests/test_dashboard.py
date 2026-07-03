@@ -1380,3 +1380,415 @@ def test_apply_wizard_update_step(tmp_path, monkeypatch):
         step1 = next(s for s in data2["steps"] if s["step"] == 1)
         assert step1["notes"] == "Updated notes"
         assert step1["completed"] is False
+
+
+# -- Phase 17: Skills matching + salary analysis + user profile -----------
+
+
+def test_save_profile_skills(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/profile/skills",
+            json={"skills": ["python", "flask"], "experience_years": 5, "salary_min": 40000, "salary_max": 60000},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        assert data["skills"] == ["python", "flask"]
+
+
+def test_save_profile_skills_upsert(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        client.post(
+            "/api/profile/skills",
+            json={"skills": ["python"], "experience_years": 3},
+            content_type="application/json",
+        )
+        resp = client.post(
+            "/api/profile/skills",
+            json={"skills": ["python", "react"], "experience_years": 5},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["skills"] == ["python", "react"]
+
+
+def test_skill_match(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(
+            conn, title="Dev Python", company="Acme", location="Paris", description="Python Django CDI"
+        )
+    with _get_app().test_client() as client:
+        client.post(
+            "/api/profile/skills",
+            json={"skills": ["python", "django", "react"], "experience_years": 5},
+            content_type="application/json",
+        )
+        resp = client.get(f"/api/skill-match/{offer_id}")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["offer_id"] == offer_id
+        assert "match_score" in data
+        assert "python" in data["matched_skills"]
+        assert "django" in data["matched_skills"]
+        assert "react" in data["missing_skills"]
+
+
+def test_skill_match_no_profile(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Dev Python", company="Acme", location="Paris")
+    with _get_app().test_client() as client:
+        resp = client.get(f"/api/skill-match/{offer_id}")
+        assert resp.status_code == 400
+
+
+def test_skill_match_offer_not_found(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/skill-match/999")
+        assert resp.status_code == 404
+
+
+def test_salary_analysis_empty(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/salary-analysis")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["count"] == 0
+
+
+def test_salary_analysis_with_data(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="A", company="Co", location="Paris", salary="50000", contract_type="CDI", source="apec")
+        add_offer(conn, title="B", company="Co", location="Paris", salary="60000", contract_type="CDI", source="apec")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/salary-analysis")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["count"] == 2
+        assert data["avg"] == 55000.0
+        assert data["min"] == 50000
+        assert data["max"] == 60000
+
+
+def test_salary_analysis_filter_source(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="A", company="Co", location="Paris", salary="50000", source="apec")
+        add_offer(conn, title="B", company="Co", location="Paris", salary="60000", external_source="okjob")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/salary-analysis?source=apec")
+        data = json.loads(resp.data)
+        assert data["count"] == 1
+
+
+def test_salary_analysis_filter_location(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        add_offer(conn, title="A", company="Co", location="Paris", salary="50000")
+        add_offer(conn, title="B", company="Co", location="Lyon", salary="60000")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/salary-analysis?location=Paris")
+        data = json.loads(resp.data)
+        assert data["count"] == 1
+
+
+# -- Phase 36: Interview prep -------------------------------------------
+
+
+def test_get_interview_prep_empty(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.get(f"/api/offer/{offer_id}/interview")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["notes"] == ""
+        assert data["checklist"] == []
+
+
+def test_save_interview_prep(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.put(
+            f"/api/offer/{offer_id}/interview",
+            json={"notes": "Preparer presentation", "checklist": [{"text": "Test 1", "done": False}]},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        # Verify via GET
+        resp2 = client.get(f"/api/offer/{offer_id}/interview")
+        data2 = json.loads(resp2.data)
+        assert data2["notes"] == "Preparer presentation"
+        assert len(data2["checklist"]) == 1
+
+
+def test_interview_prep_default_checklist(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.put(
+            f"/api/offer/{offer_id}/interview",
+            json={},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        resp2 = client.get(f"/api/offer/{offer_id}/interview")
+        data = json.loads(resp2.data)
+        assert len(data["checklist"]) == 4
+        texts = [c["text"] for c in data["checklist"]]
+        assert "Relire l'annonce" in texts
+        assert "Preparer questions" in texts
+        assert "Verifier transport" in texts
+        assert "Imprimer CV" in texts
+
+
+def test_delete_interview_prep(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        client.put(
+            f"/api/offer/{offer_id}/interview",
+            json={"notes": "test"},
+            content_type="application/json",
+        )
+        resp = client.delete(f"/api/offer/{offer_id}/interview")
+        assert resp.status_code == 200
+        # Verify deleted
+        resp2 = client.get(f"/api/offer/{offer_id}/interview")
+        data = json.loads(resp2.data)
+        assert data["notes"] == ""
+
+
+# -- Phase 38: Follow-up timeline ---------------------------------------
+
+
+def test_application_timeline_empty(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/application/1/timeline")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data == []
+
+
+def test_add_followup_and_timeline(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+        from emploi.db import add_application
+
+        app_id = add_application(conn, offer_id, status="sent")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/application/{app_id}/followup",
+            json={"type": "email", "notes": "Relance envoyee"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        # Check timeline
+        resp2 = client.get(f"/api/application/{app_id}/timeline")
+        data2 = json.loads(resp2.data)
+        assert len(data2) == 1
+        assert data2[0]["type"] == "email"
+        assert data2[0]["notes"] == "Relance envoyee"
+
+
+def test_followup_default_type(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+        from emploi.db import add_application
+
+        app_id = add_application(conn, offer_id, status="sent")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/application/{app_id}/followup",
+            json={"notes": "Juste une note"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        resp2 = client.get(f"/api/application/{app_id}/timeline")
+        data = json.loads(resp2.data)
+        assert data[0]["type"] == "note"
+
+
+# -- Phase 39: Response rate analytics -----------------------------------
+
+
+def test_response_rate_empty(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/analytics/response-rate")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["total_applications"] == 0
+        assert data["response_rate"] == 0
+
+
+def test_response_rate_with_data(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+        from emploi.db import add_application
+
+        add_application(conn, offer_id, status="draft")
+        add_application(conn, offer_id, status="sent")
+        add_application(conn, offer_id, status="interview")
+        add_application(conn, offer_id, status="rejected")
+    with _get_app().test_client() as client:
+        resp = client.get("/api/analytics/response-rate")
+        data = json.loads(resp.data)
+        assert data["total_applications"] == 4
+        assert data["interviews"] == 1
+        assert data["rejected"] == 1
+        assert data["response_rate"] == 50.0  # 2 out of 4 responded (interview + rejected)
+
+
+def test_weekly_analytics(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/analytics/weekly")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert "applications_per_week" in data
+        assert "new_offers_per_week" in data
+        assert len(data["applications_per_week"]) == 4
+        assert len(data["new_offers_per_week"]) == 4
+
+
+# -- Phase 47: Smart reminders -------------------------------------------
+
+
+def test_list_reminders_empty(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/reminders")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data == []
+
+
+def test_create_reminder(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/reminders",
+            json={"title": "Relance Acme", "remind_at": "2026-07-10T09:00:00"},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["ok"] is True
+        assert "id" in data
+
+
+def test_create_reminder_validation(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/reminders",
+            json={"title": ""},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+
+def test_get_reminder(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/reminders",
+            json={"title": "Test", "remind_at": "2026-07-10T09:00:00", "type": "interview"},
+            content_type="application/json",
+        )
+        rid = json.loads(resp.data)["id"]
+        resp2 = client.get(f"/api/reminders/{rid}")
+        assert resp2.status_code == 200
+        data = json.loads(resp2.data)
+        assert data["title"] == "Test"
+        assert data["type"] == "interview"
+
+
+def test_get_reminder_not_found(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/reminders/999")
+        assert resp.status_code == 404
+
+
+def test_update_reminder(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/reminders",
+            json={"title": "Old", "remind_at": "2026-07-10T09:00:00"},
+            content_type="application/json",
+        )
+        rid = json.loads(resp.data)["id"]
+        resp2 = client.put(
+            f"/api/reminders/{rid}",
+            json={"title": "New", "completed": 1},
+            content_type="application/json",
+        )
+        assert resp2.status_code == 200
+        resp3 = client.get(f"/api/reminders/{rid}")
+        data = json.loads(resp3.data)
+        assert data["title"] == "New"
+        assert data["completed"] == 1
+
+
+def test_delete_reminder(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/reminders",
+            json={"title": "To delete", "remind_at": "2026-07-10T09:00:00"},
+            content_type="application/json",
+        )
+        rid = json.loads(resp.data)["id"]
+        resp2 = client.delete(f"/api/reminders/{rid}")
+        assert resp2.status_code == 200
+        resp3 = client.get(f"/api/reminders/{rid}")
+        assert resp3.status_code == 404
+
+
+def test_delete_reminder_not_found(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.delete("/api/reminders/999")
+        assert resp.status_code == 404
+
+
+def test_reminders_with_offer(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        offer_id = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            "/api/reminders",
+            json={"title": "Relance", "remind_at": "2026-07-10", "offer_id": offer_id},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        rid = json.loads(resp.data)["id"]
+        resp2 = client.get(f"/api/reminders/{rid}")
+        data = json.loads(resp2.data)
+        assert data["offer_id"] == offer_id
