@@ -645,6 +645,67 @@ def create_app() -> object:
         finally:
             conn.close()
 
+    # ── Benefits / visa / commute ───────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/benefits", methods=["PUT"])
+    def api_set_benefits(offer_id):
+        data = request.get_json(force=True)
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS offer_benefits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    benefits_json TEXT DEFAULT '{}',
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO offer_benefits (offer_id, benefits_json)
+                VALUES (?, ?) ON CONFLICT(offer_id) DO UPDATE SET
+                benefits_json=excluded.benefits_json, updated_at=CURRENT_TIMESTAMP""",
+                (offer_id, json.dumps(data.get("benefits", {}))),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/offer/<int:offer_id>/visa", methods=["PUT"])
+    def api_set_visa_info(offer_id):
+        data = request.get_json(force=True)
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS offer_visa (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER UNIQUE NOT NULL,
+                    visa_sponsorship INTEGER DEFAULT 0,
+                    relocation_assistance INTEGER DEFAULT 0,
+                    languages TEXT DEFAULT '',
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO offer_visa (offer_id, visa_sponsorship, relocation_assistance, languages)
+                VALUES (?, ?, ?, ?) ON CONFLICT(offer_id) DO UPDATE SET
+                visa_sponsorship=excluded.visa_sponsorship,
+                relocation_assistance=excluded.relocation_assistance,
+                languages=excluded.languages""",
+                (offer_id, data.get("visa_sponsorship", 0), data.get("relocation", 0), data.get("languages", "")),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/commute")
+    def api_commute():
+        home = request.args.get("from", "")
+        dest = request.args.get("to", "")
+        return jsonify({"from": home, "to": dest, "estimated_minutes": 0, "note": "Geocoding not configured"})
+
     # ── Semantic search (basic) ─────────────────────────────────────────
 
     @app.route("/api/search/semantic")
@@ -751,6 +812,77 @@ def create_app() -> object:
                 return jsonify({"ok": True})
         finally:
             conn.close()
+
+    # ── Voice notes ─────────────────────────────────────────────────────
+
+    @app.route("/api/offer/<int:offer_id>/voice-notes", methods=["GET", "POST", "DELETE"])
+    def api_voice_notes(offer_id):
+        conn = _get_db()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS voice_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER NOT NULL,
+                    audio_data TEXT DEFAULT '',
+                    transcript TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (offer_id) REFERENCES offers(id)
+                )"""
+            )
+            if request.method == "GET":
+                rows = conn.execute(
+                    "SELECT id, transcript, created_at FROM voice_notes WHERE offer_id = ? ORDER BY created_at DESC",
+                    (offer_id,),
+                ).fetchall()
+                return jsonify([dict(r) for r in rows])
+            elif request.method == "DELETE":
+                note_id = request.args.get("id", "").strip()
+                if note_id:
+                    conn.execute("DELETE FROM voice_notes WHERE id = ? AND offer_id = ?", (int(note_id), offer_id))
+                    conn.commit()
+                return jsonify({"ok": True})
+            else:
+                data = request.get_json(force=True)
+                conn.execute(
+                    "INSERT INTO voice_notes (offer_id, audio_data, transcript) VALUES (?, ?, ?)",
+                    (offer_id, data.get("audio", ""), data.get("transcript", "")),
+                )
+                conn.commit()
+                return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── i18n ────────────────────────────────────────────────────────────
+
+    @app.route("/api/i18n/<lang>")
+    def api_i18n(lang):
+        translations = {
+            "fr": {
+                "offers": "Offres",
+                "applications": "Candidatures",
+                "actions": "Actions",
+                "stats": "Stats",
+                "search": "Rechercher",
+                "filter": "Filtrer",
+            },
+            "en": {
+                "offers": "Offers",
+                "applications": "Applications",
+                "actions": "Actions",
+                "stats": "Stats",
+                "search": "Search",
+                "filter": "Filter",
+            },
+            "de": {
+                "offers": "Angebote",
+                "applications": "Bewerbungen",
+                "actions": "Aktionen",
+                "stats": "Statistiken",
+                "search": "Suchen",
+                "filter": "Filtern",
+            },
+        }
+        return jsonify(translations.get(lang, translations["fr"]))
 
     # ── Import sources status ───────────────────────────────────────────
 

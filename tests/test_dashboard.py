@@ -1792,3 +1792,69 @@ def test_reminders_with_offer(tmp_path, monkeypatch):
         resp2 = client.get(f"/api/reminders/{rid}")
         data = json.loads(resp2.data)
         assert data["offer_id"] == offer_id
+
+
+# ── Contract / benefits / visa / commute / voice / i18n ─────────────────────
+
+
+def test_contract_analyze(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.post(
+            f"/api/offer/{oid}/contract/analyze",
+            json={"text": "Période d'essai de 3 mois. Salaire 50000 euros brut."},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        assert "clauses" in json.loads(resp.data)
+
+
+def test_benefits(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.put(
+            f"/api/offer/{oid}/benefits", json={"benefits": {"mutuelle": True}}, content_type="application/json"
+        )
+        assert resp.status_code == 200
+
+
+def test_visa_info(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        resp = client.put(
+            f"/api/offer/{oid}/visa", json={"visa_sponsorship": 1, "languages": "FR"}, content_type="application/json"
+        )
+        assert resp.status_code == 200
+
+
+def test_commute(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        resp = client.get("/api/commute?from=Bogève&to=Annemasse")
+        assert resp.status_code == 200
+
+
+def test_voice_notes(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with connect(tmp_path / "emploi.sqlite") as conn:
+        oid = add_offer(conn, title="Test", company="Co", location="X")
+    with _get_app().test_client() as client:
+        client.post(f"/api/offer/{oid}/voice-notes", json={"transcript": "Note"}, content_type="application/json")
+        resp = client.get(f"/api/offer/{oid}/voice-notes")
+        assert resp.status_code == 200
+        assert len(json.loads(resp.data)) == 1
+
+
+def test_i18n(tmp_path, monkeypatch):
+    _create_test_db(tmp_path, monkeypatch)
+    with _get_app().test_client() as client:
+        data_fr = json.loads(client.get("/api/i18n/fr").data)
+        assert data_fr["offers"] == "Offres"
+        data_en = json.loads(client.get("/api/i18n/en").data)
+        assert data_en["offers"] == "Offers"
