@@ -426,10 +426,15 @@ def _is_smart_apply_step(preview: str) -> bool:
 def _smart_apply_expression() -> str:
     """Soumet l'étape Smart Apply (postsav2formstepframeview).
 
-    Injecte la réponse via le swap Turbo (frame id de la réponse) pour que les
-    contrôleurs Stimulus (``mutable``) se connectent et chargent la question du
-    recruteur, attend le chargement, puis rapporte : confirmation, question
-    visible (à faire valider par l'utilisateur) ou étape inchangée.
+    Deux modes, le plus fidèle d'abord :
+    1. clic natif sur le bouton submit — le contrôleur Stimulus
+       ``form-validator`` du site fait son propre fetch avec la bonne
+       sérialisation et Turbo swappe la réponse ;
+    2. repli fetch direct (FormData) si aucun bouton n'est cliquable.
+
+    Attend ensuite le chargement du contrôleur ``mutable`` (questions du
+    recruteur) puis rapporte : confirmation, questions restantes, étape
+    inchangée.
     """
     return r"""
 (async () => {
@@ -437,34 +442,45 @@ def _smart_apply_expression() -> str:
   let form = document.querySelector('#funnel-smart-apply-form') ||
              Array.from(document.querySelectorAll('form')).find(f => /postsav2formstepframeview/.test(f.getAttribute('action') || ''));
   if (!form) throw new Error('Formulaire Smart Apply HelloWork introuvable');
-  const submitResponse = await fetch(form.getAttribute('action') || '/fr-fr/offres/postsav2formstepframeview', {
-    method: 'POST', credentials: 'include', body: new FormData(form),
-    headers: {'Turbo-Frame': 'funnel-frame', 'X-Requested-With': 'XMLHttpRequest'}
-  });
-  out.submitStatus = submitResponse.status;
-  const responseText = await submitResponse.text();
-  const doc = new DOMParser().parseFromString(responseText, 'text/html');
-  const respFrame = doc.querySelector('turbo-frame');
-  let target = null;
-  if (respFrame) {
-    const live = document.querySelector(`turbo-frame[id="${respFrame.id}"]`);
-    if (live) { live.innerHTML = respFrame.innerHTML; target = live; }
-  }
-  if (!target) {
-    target = document.querySelector('#funnel-frame');
-    if (!target) {
-      target = document.createElement('turbo-frame');
-      target.id = 'funnel-frame';
-      document.body.appendChild(target);
+  const btn = form.querySelector('button[type=submit]') ||
+              Array.from(document.querySelectorAll('button')).find(b => /postuler/i.test(b.innerText || b.value || ''));
+  if (btn) {
+    // soumission native : le contrôleur form-validator sérialise et fetch
+    out.nativeSubmit = true;
+    btn.click();
+  } else {
+    out.nativeSubmit = false;
+    const submitResponse = await fetch(form.getAttribute('action') || '/fr-fr/offres/postsav2formstepframeview', {
+      method: 'POST', credentials: 'include', body: new FormData(form),
+      headers: {'Turbo-Frame': 'funnel-frame', 'X-Requested-With': 'XMLHttpRequest'}
+    });
+    out.submitStatus = submitResponse.status;
+    const responseText = await submitResponse.text();
+    const doc = new DOMParser().parseFromString(responseText, 'text/html');
+    const respFrame = doc.querySelector('turbo-frame');
+    let target = null;
+    if (respFrame) {
+      const live = document.querySelector(`turbo-frame[id="${respFrame.id}"]`);
+      if (live) { live.innerHTML = respFrame.innerHTML; target = live; }
     }
-    target.innerHTML = responseText;
+    if (!target) {
+      target = document.querySelector('#funnel-frame');
+      if (!target) {
+        target = document.createElement('turbo-frame');
+        target.id = 'funnel-frame';
+        document.body.appendChild(target);
+      }
+      target.innerHTML = responseText;
+    }
   }
   // laisse le contrôleur mutable (question du recruteur) se charger
-  await new Promise(r => setTimeout(r, 4000));
+  await new Promise(r => setTimeout(r, 5000));
   const text = document.body ? document.body.innerText.replace(/\s+/g, ' ') : '';
   out.urlAfter = location.href;
   out.confirmed = /candidature\s+est\s+envoy|candidature\s+envoy/i.test(text);
   out.textPreview = text.slice(0, 500);
+  const funnelEl = document.querySelector('#funnel-frame');
+  out.frameText = (funnelEl ? funnelEl.innerText || '' : '').replace(/\s+/g, ' ').slice(0, 800);
   const qform = document.querySelector('#funnel-smart-apply-form');
   if (qform) {
     const extra = Array.from(qform.querySelectorAll('input:not([type=hidden]), select, textarea'));
