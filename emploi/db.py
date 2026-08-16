@@ -36,6 +36,7 @@ APPLICATION_STATUSES = frozenset(
 FEATURE_OPTIONS: dict[str, bool] = {
     "brief.enabled": True,
     "drafts.enabled": True,
+    "followups.enabled": True,
     "france_travail.enabled": True,
     "import.enabled": True,
     "managed_browser.enabled": True,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -30,9 +32,23 @@ from emploi.db import (
 )
 from emploi.nextcloud_deck import create_offer_card
 from emploi.nextcloud_files import export_application_to_nextcloud
-from emploi.nextcloud_tasks import create_followup_task, sync_due_followup_tasks
+from emploi.nextcloud_tasks import (
+    create_followup_task,
+    create_interview_task,
+    create_manual_task,
+    sync_due_followup_tasks,
+)
 
 console = Console(soft_wrap=True)
+
+
+def _parse_interview_datetime(value: str) -> tuple[str, str]:
+    """Parse 'YYYY-MM-DD HH:MM' into (date_iso, time_hhmm)."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("Format attendu: YYYY-MM-DD HH:MM (ex: 2026-08-20 14:30)") from error
+    return parsed.date().isoformat(), parsed.strftime("%H:%M")
 
 
 @application_app.command("draft")
@@ -454,3 +470,85 @@ def application_list() -> None:
             application["applied_at"],
         )
     console.print(table)
+
+
+@application_app.command("interview")
+def application_interview(
+    action: str = typer.Argument("add", help="Action: add"),
+    offer_id: int = typer.Argument(..., help="ID de l'offre concernée"),
+    due_date: str = typer.Option(..., "--date", help="Date et heure de l'entretien, ex: 2026-08-20 14:30"),
+    location: str = typer.Option("", "--location", help="Lieu de l'entretien (adresse, visio…)"),
+    notes: str = typer.Option("", "--notes", help="Notes préparatoires"),
+    endpoint_name: str = typer.Option("", "--tasks-endpoint", help="Endpoint nextcloud-tasks; vide = défaut"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans créer de VTODO"),
+    force: bool = typer.Option(False, "--force", help="Recréer même si un événement existe"),
+) -> None:
+    """Planifie un entretien d'embauche pour une offre (VTODO CalDAV)."""
+    if action.strip().lower() != "add":
+        raise typer.BadParameter("Action attendue: add")
+    _ensure_option_enabled("followups.enabled")
+    try:
+        due_date_iso, due_time = _parse_interview_datetime(due_date)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    endpoint = (
+        emploi_config.get_nextcloud_tasks_endpoint(endpoint_name)
+        if endpoint_name
+        else emploi_config.get_default_nextcloud_tasks_endpoint()
+    )
+    if endpoint is None:
+        raise typer.BadParameter("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
+    try:
+        with connect() as conn:
+            init_db(conn)
+            result = create_interview_task(
+                conn,
+                offer_id,
+                due_date=due_date_iso,
+                due_time=due_time,
+                endpoint=endpoint,
+                location=location,
+                notes=notes,
+                dry_run=dry_run,
+                force=force,
+            )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    verb = "préparée" if dry_run else ("déjà enregistrée" if result.reused_existing else "planifiée")
+    console.print(f"Tâche Nextcloud {verb} : {result.summary}")
+    console.print(f"Échéance : {result.due_date}" + (f" {result.due_time}" if result.due_time else ""))
+    if result.href:
+        console.print(f"Href : {result.href}")
+    if dry_run:
+        console.print("Dry-run : aucun VTODO créé.")
+
+
+@application_app.command("task")
+def application_task(
+    action: str = typer.Argument("add", help="Action: add"),
+    summary: str = typer.Argument(..., help="Texte de la tâche"),
+    due_date: str = typer.Option(..., "--due", help="Date d'échéance YYYY-MM-DD"),
+    endpoint_name: str = typer.Option("", "--tasks-endpoint", help="Endpoint nextcloud-tasks; vide = défaut"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans créer de VTODO"),
+) -> None:
+    """Crée une tâche générique (sans offre liée) dans Nextcloud Tasks."""
+    if action.strip().lower() != "add":
+        raise typer.BadParameter("Action attendue: add")
+    _ensure_option_enabled("followups.enabled")
+    endpoint = (
+        emploi_config.get_nextcloud_tasks_endpoint(endpoint_name)
+        if endpoint_name
+        else emploi_config.get_default_nextcloud_tasks_endpoint()
+    )
+    if endpoint is None:
+        raise typer.BadParameter("Aucun endpoint Nextcloud Tasks configuré. Utilise `emploi nextcloud-tasks set ...`.")
+    try:
+        result = create_manual_task(summary=summary, due_date=due_date, endpoint=endpoint, dry_run=dry_run)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    verb = "préparée" if dry_run else "créée"
+    console.print(f"Tâche Nextcloud {verb} : {result.summary} — échéance {result.due_date}")
+    if result.href:
+        console.print(f"Href : {result.href}")
+    if dry_run:
+        console.print("Dry-run : aucun VTODO créé.")

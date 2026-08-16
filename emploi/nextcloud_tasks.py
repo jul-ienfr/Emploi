@@ -108,9 +108,19 @@ def _fold_ical_line(line: str) -> list[str]:
     return folded
 
 
-def build_vtodo(*, uid: str, summary: str, description: str, due_date: str) -> str:
+def build_vtodo(*, uid: str, summary: str, description: str, due_date: str, due_time: str = "") -> str:
+    """Build a VTODO iCalendar payload.
+
+    ``due_date`` is YYYY-MM-DD (date-only DUE); ``due_time`` optionally adds
+    an hour (HH:MM) to produce a DATE-TIME DUE (entretiens).
+    """
     date.fromisoformat(due_date)
     stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    if due_time:
+        hour, minute = due_time.split(":", 1)
+        due_line = f"DUE;VALUE=DATE-TIME:{due_date.replace('-', '')}T{int(hour):02d}{int(minute):02d}00"
+    else:
+        due_line = f"DUE;VALUE=DATE:{due_date.replace('-', '')}"
     raw_lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -118,7 +128,7 @@ def build_vtodo(*, uid: str, summary: str, description: str, due_date: str) -> s
         "BEGIN:VTODO",
         f"UID:{_escape_ical_text(uid)}",
         f"DTSTAMP:{stamp}",
-        f"DUE;VALUE=DATE:{due_date.replace('-', '')}",
+        due_line,
         "STATUS:NEEDS-ACTION",
         f"SUMMARY:{_escape_ical_text(summary)}",
         f"DESCRIPTION:{_escape_ical_text(description)}",
@@ -256,6 +266,169 @@ def create_followup_task(
         description=description,
         due_date=due_date,
         href=href,
+    )
+
+
+@dataclass(frozen=True)
+class InterviewTaskResult:
+    offer_id: int
+    uid: str
+    summary: str
+    description: str
+    due_date: str
+    due_time: str = ""
+    href: str = ""
+    dry_run: bool = False
+    reused_existing: bool = False
+
+
+@dataclass(frozen=True)
+class ManualTaskResult:
+    uid: str
+    summary: str
+    due_date: str
+    href: str = ""
+    dry_run: bool = False
+
+
+def _interview_uid(endpoint_name: str, offer_id: int, due_date: str, due_time: str) -> str:
+    digest = hashlib.sha1(f"{endpoint_name}:{offer_id}:{due_date}:{due_time}".encode()).hexdigest()[:12]
+    return f"emploi-interview-{offer_id}-{digest}"
+
+
+def compose_interview_task_description(offer, *, location: str = "", notes: str = "") -> str:
+    lines = [
+        f"Offre #{offer['id']}",
+        f"Entreprise : {offer['company'] or 'non précisé'}",
+        f"Lieu : {offer['location'] or 'non précisé'}",
+    ]
+    if location:
+        lines.append(f"Lieu d'entretien : {location}")
+    url = _first_url(offer)
+    if url:
+        lines.append(f"Offre : {url}")
+    if notes:
+        lines.extend(["", notes])
+    return "\n".join(lines)
+
+
+def _existing_interview_task_event(conn, offer_id: int, *, endpoint_name: str, uid: str):
+    for event in list_offer_events(conn, offer_id):
+        if event["event_type"] != "nextcloud_interview_task":
+            continue
+        try:
+            payload = json.loads(event["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if payload.get("endpoint") == endpoint_name and payload.get("uid") == uid:
+            return payload
+    return None
+
+
+def create_interview_task(
+    conn,
+    offer_id: int,
+    *,
+    due_date: str,
+    due_time: str,
+    endpoint: dict[str, object],
+    location: str = "",
+    notes: str = "",
+    client: TasksClientProtocol | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+) -> InterviewTaskResult:
+    """Crée un VTODO « Entretien » pour une offre (CalDAV Nextcloud)."""
+    date.fromisoformat(due_date)
+    offer = get_offer(conn, offer_id)
+    if offer is None:
+        raise ValueError(f"Offre introuvable: {offer_id}")
+    endpoint_name = str(endpoint.get("name", "") or "")
+    calendar = str(endpoint.get("calendar", "tasks") or "tasks")
+    uid = _interview_uid(endpoint_name, offer_id, due_date, due_time)
+    summary = f"Entretien — {compose_deck_card_title(offer)}"
+    description = compose_interview_task_description(offer, location=location, notes=notes)
+    existing = None if force else _existing_interview_task_event(conn, offer_id, endpoint_name=endpoint_name, uid=uid)
+    if existing is not None:
+        return InterviewTaskResult(
+            offer_id=offer_id,
+            uid=str(existing.get("uid") or uid),
+            summary=summary,
+            description=description,
+            due_date=due_date,
+            due_time=due_time,
+            href=str(existing.get("href") or ""),
+            reused_existing=True,
+        )
+    if dry_run:
+        return InterviewTaskResult(
+            offer_id=offer_id,
+            uid=uid,
+            summary=summary,
+            description=description,
+            due_date=due_date,
+            due_time=due_time,
+            dry_run=True,
+        )
+    tasks = client or NextcloudTasksClient(endpoint)
+    created = tasks.create_task(uid=uid, summary=summary, description=description, due_date=due_date)
+    href = str(created.get("href", "") or "")
+    add_offer_event(
+        conn,
+        offer_id,
+        event_type="nextcloud_interview_task",
+        message=f"Entretien planifié: {summary}",
+        payload_json=json.dumps(
+            {
+                "endpoint": endpoint_name,
+                "calendar": calendar,
+                "offer_id": offer_id,
+                "uid": uid,
+                "href": href,
+                "due_date": due_date,
+                "due_time": due_time,
+                "summary": summary,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    return InterviewTaskResult(
+        offer_id=offer_id,
+        uid=uid,
+        summary=summary,
+        description=description,
+        due_date=due_date,
+        due_time=due_time,
+        href=href,
+    )
+
+
+def _manual_task_uid(endpoint_name: str, summary: str, due_date: str) -> str:
+    digest = hashlib.sha1(f"{endpoint_name}:{summary}:{due_date}".encode()).hexdigest()[:12]
+    return f"emploi-task-{digest}"
+
+
+def create_manual_task(
+    *,
+    summary: str,
+    due_date: str,
+    endpoint: dict[str, object],
+    client: TasksClientProtocol | None = None,
+    dry_run: bool = False,
+) -> ManualTaskResult:
+    """Crée un VTODO générique (tâche manuelle sans offre liée). UID déterministe → idempotent."""
+    date.fromisoformat(due_date)
+    endpoint_name = str(endpoint.get("name", "") or "")
+    uid = _manual_task_uid(endpoint_name, summary, due_date)
+    if dry_run:
+        return ManualTaskResult(uid=uid, summary=summary, due_date=due_date, dry_run=True)
+    tasks = client or NextcloudTasksClient(endpoint)
+    created = tasks.create_task(uid=uid, summary=summary, description="", due_date=due_date)
+    return ManualTaskResult(
+        uid=uid,
+        summary=summary,
+        due_date=due_date,
+        href=str(created.get("href", "") or ""),
     )
 
 
