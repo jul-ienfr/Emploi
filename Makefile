@@ -1,10 +1,13 @@
-.PHONY: test lint format check install dev
+.PHONY: test lint format check cov install dev
 
 test:
 	.venv/bin/python -m pytest tests/ -x -q
 
 test-verbose:
 	.venv/bin/python -m pytest tests/ -v
+
+cov:
+	.venv/bin/python -m pytest tests/ --cov=emploi --cov-report=term-missing
 
 lint:
 	.venv/bin/ruff check emploi/ tests/

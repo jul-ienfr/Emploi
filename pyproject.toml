@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "pytest-cov>=4.0",
   "ruff>=0.4",
   "mypy>=1.10",
 ]
@@ -30,6 +31,11 @@ include = ["emploi*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.report]
+fail_under = 70
+skip_covered = true
+show_missing = true
 
 [tool.ruff]
 line-length = 120
