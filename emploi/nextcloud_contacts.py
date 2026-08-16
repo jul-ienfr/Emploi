@@ -80,7 +80,7 @@ class NextcloudContactsClient:
 
     def list_contacts(self) -> list[Contact]:
         """List contacts by GETting the addressbook (Nextcloud returns concatenated VCARDs)."""
-        text = self._request("GET", self.addressbook_url).decode("utf-8", errors="replace")  # type: ignore[misc]
+        text: str = self._request("GET", self.addressbook_url).decode("utf-8", errors="replace")  # type: ignore[misc]
         return [_parse_vcard(block) for block in _split_vcards(text) if "UID:" in block]
 
     def add_contact(

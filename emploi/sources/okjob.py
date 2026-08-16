@@ -105,7 +105,7 @@ def search_okjob(
     while len(all_offers) < max_results:
         url = _build_search_url(query, location, page)
         try:
-            html = _fetch_html(url)  # type: ignore[misc]
+            html: str = _fetch_html(url)  # type: ignore[misc]
         except Exception as exc:
             logger.warning("okjob search failed (page %d): %s", page, exc)
             break

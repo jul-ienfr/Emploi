@@ -80,7 +80,7 @@ class NextcloudDeckClient:
 
     def list_stacks(self) -> list[dict[str, object]]:
         """List the board's stacks (each with its cards)."""
-        result = self._request_json("GET", "/stacks", {})  # type: ignore[misc]
+        result: object = self._request_json("GET", "/stacks", {})  # type: ignore[misc]
         if isinstance(result, list):
             return result
         return []
@@ -188,7 +188,7 @@ def create_offer_card(
     deck = client or NextcloudDeckClient(endpoint)
     created = deck.create_card(stack_id=int(stack_id), title=title, description=description)
     card_id = created.get("id")
-    normalized_card_id = int(card_id) if card_id is not None else None
+    normalized_card_id = int(card_id) if card_id is not None else None  # type: ignore[call-overload]
     add_offer_event(
         conn,
         offer_id,

@@ -229,7 +229,7 @@ class ManagedBrowserClient:
         logger.debug("Browser %s %s (timeout=%.0fs)", method, url, timeout)
         for attempt in range(self._retry_on_server + 1):
             try:
-                raw = self._http_request(req, timeout)  # type: ignore[misc]
+                raw: bytes = self._http_request(req, timeout)  # type: ignore[misc]
                 break
             except ManagedBrowserUnavailableError:
                 raise
