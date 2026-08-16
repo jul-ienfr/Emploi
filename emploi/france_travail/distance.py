@@ -26,24 +26,35 @@ KNOWN_LOCATIONS: dict[str, LocationPoint] = {
     "saint pierre en faucigny": LocationPoint("Saint-Pierre-en-Faucigny", 46.059990, 6.372410),
     "saint-pierre-en-faucigny": LocationPoint("Saint-Pierre-en-Faucigny", 46.059990, 6.372410),
     "perrignier": LocationPoint("Perrignier", 46.306464, 6.440684),
+    "scionzier": LocationPoint("Scionzier", 46.058397, 6.352289),
+    "cluses": LocationPoint("Cluses", 46.059670, 6.585480),
+    "contamine sur arve": LocationPoint("Contamine-sur-Arve", 46.079650, 6.333210),
+    "ville la grand": LocationPoint("Ville-la-Grand", 46.199830, 6.182830),
+    "ayse": LocationPoint("Ayse", 46.083130, 6.392170),
 }
 
 POSTCODE_HINTS: dict[str, str] = {
     "74250": "bogève",
     "74100": "annemasse",
-    "74130": "bonneville",
+    "74130": "ayse",  # Bonneville partage ce code postal; Ayse est le dernier win (comportement conservé)
     "74380": "bonne",
     "74890": "bons-en-chablais",
     "74800": "saint-pierre-en-faucigny",
     "74550": "perrignier",
+    "74700": "cluses",
+    "74140": "bonneville",
+    "74350": "scionzier",
+    "74270": "contamine-sur-arve",
+    "74200": "ville-la-grand",
 }
 
 
 def _key(value: str) -> str:
     text = value.casefold()
-    text = re.sub(r"\b\d{2}\s*-\s*", " ", text)
+    text = re.sub(r"\b\d{2,5}\b", " ", text)  # strip postcodes (74, 74250, etc.)
+    text = re.sub(r"\s*-\s*", " ", text)  # normalize dashes (Scionzier - 74 → Scionzier)
     text = re.sub(r"\bfrance\b", " ", text)
-    text = text.replace("’", "'").replace("-", " ")
+    text = text.replace("\u2019", "'").replace("-", " ")
     text = re.sub(r"[^\w\s']+", " ", text, flags=re.U)
     return re.sub(r"\s+", " ", text).strip()
 

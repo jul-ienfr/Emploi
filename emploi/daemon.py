@@ -19,12 +19,23 @@ if TYPE_CHECKING:
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
 from emploi.db import add_offer, connect, init_db, list_saved_searches
 from emploi.france_travail.flows import run_saved_search
+from emploi.hellowork_search import run_hellowork_saved_search
 from emploi.logging import get_logger
 from emploi.monitoring import report_cycle_result, send_alert
 
 logger = get_logger("daemon")
 
+SEARCH_ENGINES: list[str] = ["france-travail", "hellowork"]
 POLL_INTERVAL_S = 5  # vérification arrêt tous les 5s
+
+
+def _resolve_daemon_sources(source: str) -> list[str]:
+    """Resolve profile source to engine list (avoids circular import from emploi.cli)."""
+    if source == "all":
+        return list(SEARCH_ENGINES)
+    if source in SEARCH_ENGINES:
+        return [source]
+    return []
 
 
 def _now_iso() -> str:
@@ -48,17 +59,22 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> tuple[int, i
     errors: list[str] = []
     for saved in profiles:
         try:
-            results = run_saved_search(conn, int(saved["id"]), site=site, profile=profile)
+            source = str(saved["source"]) if "source" in saved.keys() else "all"
+            sources = _resolve_daemon_sources(source)
+            for src in sources:
+                if src == "hellowork":
+                    results = run_hellowork_saved_search(conn, int(saved["id"]), site=site, profile=profile)
+                else:
+                    results = run_saved_search(conn, int(saved["id"]), site=site, profile=profile)
+                total += len(results)
+                created += sum(1 for r in results if r.created)
+                updated += sum(1 for r in results if not r.created)
+                _print(f"  {saved['name']} ({src}): {len(results)} offre(s) traitée(s)")
+                logger.info("Profil %s (%s): %d offre(s)", saved["name"], src, len(results))
         except Exception as exc:
             _print(f"ERREUR {saved['name']}: {exc}")
             logger.error("Erreur profil %s: %s", saved["name"], exc, exc_info=True)
             errors.append(f"{saved['name']}: {exc}")
-            continue
-        total += len(results)
-        created += sum(1 for r in results if r.created)
-        updated += sum(1 for r in results if not r.created)
-        _print(f"  {saved['name']}: {len(results)} offre(s) traitée(s)")
-        logger.info("Profil %s: %d offre(s)", saved["name"], len(results))
 
     # Also search Swiss sources using saved search queries
     try:

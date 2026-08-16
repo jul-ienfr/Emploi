@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
 from emploi.db import add_offer, add_offer_event, get_offer
+from emploi.france_travail.distance import within_requested_radius
 from emploi.france_travail.flows import SearchImportResult
 from emploi.scoring import score_offer
 from emploi.utils import _matches_terms
@@ -37,6 +38,7 @@ def _browser(browser: Any = None) -> Any:
 # ---------------------------------------------------------------------------
 # URL builder
 # ---------------------------------------------------------------------------
+
 
 def _extract_positive_query(query: str) -> str:
     """Extract only positive terms from a query (strip exclusions like -Mécanicien).
@@ -101,6 +103,7 @@ def build_hellowork_search_url(query: str, location: str = "", contract: str = "
 # HTML parsing (extract offers from search results page)
 # ---------------------------------------------------------------------------
 
+
 def _parse_salary(aria_label: str) -> str:
     """Extract salary from aria-label like 'avec un salaire de 2 700 - 3 300 € / mois'."""
     match = re.search(r"avec un salaire de ([^,]+)", aria_label)
@@ -117,10 +120,8 @@ SERP_CARD_RE = re.compile(
     r'<div\b[^>]*data-cy="serpCard"[^>]*>(.*?)</div>\s*(?=<div\b[^>]*data-cy="serpCard"|</div>|\Z)',
     re.I | re.S,
 )
-ANALYTICS_JSON_RE = re.compile(r'data-analytics-values-param=\'([^\']+)\'')
-OFFER_TITLE_LINK_RE = re.compile(
-    r'<a\b[^>]*data-cy="offerTitle"[^>]*>.*?</a>', re.I | re.S
-)
+ANALYTICS_JSON_RE = re.compile(r"data-analytics-values-param=\'([^\']+)\'")
+OFFER_TITLE_LINK_RE = re.compile(r'<a\b[^>]*data-cy="offerTitle"[^>]*>.*?</a>', re.I | re.S)
 TITLE_ATTR_RE = re.compile(r'title="([^"]*)"')
 HREF_RE = re.compile(r'href="([^"]*)"')
 ARIA_LABEL_RE = re.compile(r'aria-label="([^"]*)"')
@@ -151,20 +152,24 @@ def extract_hellowork_offers(html_text: str) -> list[dict[str, str]]:
     cards: list[str] = []
     pos = 0
     while True:
-        start = html_text.find('<div', pos)
+        start = html_text.find("<div", pos)
         if start == -1:
             break
         # Check if this div is a serpCard
-        chunk = html_text[start:start + 1000]
+        chunk = html_text[start : start + 1000]
         if 'data-cy="serpCard"' in chunk:
             # Find the matching closing </div>
             depth = 1
-            i = start + len('<div')
+            i = start + len("<div")
             while i < len(html_text) and depth > 0:
-                if html_text[i:i+4] == '<div' and html_text[i+4] not in '0123456789' and html_text[i-1] not in '>':
+                if (
+                    html_text[i : i + 4] == "<div"
+                    and html_text[i + 4] not in "0123456789"
+                    and html_text[i - 1] not in ">"
+                ):
                     depth += 1
                     i += 4
-                elif html_text[i:i+6] == '</div>':
+                elif html_text[i : i + 6] == "</div>":
                     depth -= 1
                     i += 6
                 else:
@@ -235,15 +240,17 @@ def extract_hellowork_offers(html_text: str) -> list[dict[str, str]]:
             if aria_match:
                 salary = _parse_salary(aria_match.group(1))
 
-        results.append({
-            "external_id": external_id,
-            "title": title,
-            "company": company,
-            "location": location,
-            "contract_type": contract_type,
-            "browser_url": browser_url,
-            "salary": salary,
-        })
+        results.append(
+            {
+                "external_id": external_id,
+                "title": title,
+                "company": company,
+                "location": location,
+                "contract_type": contract_type,
+                "browser_url": browser_url,
+                "salary": salary,
+            }
+        )
 
     return results
 
@@ -252,17 +259,29 @@ def extract_hellowork_offers(html_text: str) -> list[dict[str, str]]:
 # Relevance filter (same pattern as France Travail)
 # ---------------------------------------------------------------------------
 
-def _offer_is_relevant(offer: dict[str, str], *, query: str) -> bool:
-    """Check if an offer is relevant to the query."""
+
+def _offer_is_relevant(
+    offer: dict[str, str],
+    *,
+    query: str,
+    origin_location: str = "",
+    requested_radius: int = 0,
+) -> bool:
+    """Check if an offer is relevant to the query and within the radius."""
     text = " ".join((offer["title"], offer["company"], offer["location"], offer["contract_type"]))
     if not query:
         return True
-    return _matches_terms(text, query)
+    if not _matches_terms(text, query):
+        return False
+    if not within_requested_radius(origin_location, offer.get("location", ""), requested_radius):
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
 # DB upsert (same pattern as _upsert_extracted_offer in france_travail/flows.py)
 # ---------------------------------------------------------------------------
+
 
 def _find_existing(conn, external_id: str, browser_url: str):
     """Look up an existing offer by external_id or browser_url."""
@@ -295,12 +314,14 @@ def _upsert_hellowork_offer(conn, offer: dict[str, str], snapshot_payload) -> Se
     raw_snapshot = _raw_json(snapshot_payload)
     existing = _find_existing(conn, offer["external_id"], offer["browser_url"])
     merged: dict[str, object] = dict(existing) if existing else {}
-    merged.update({
-        "title": offer["title"],
-        "company": offer["company"],
-        "location": offer["location"],
-        "description": "",
-    })
+    merged.update(
+        {
+            "title": offer["title"],
+            "company": offer["company"],
+            "location": offer["location"],
+            "description": "",
+        }
+    )
     scored = score_offer(merged)
 
     if existing:
@@ -400,6 +421,7 @@ def _fetch_hellowork_html(url: str) -> str:
 # Main search function
 # ---------------------------------------------------------------------------
 
+
 def search_hellowork(
     conn,
     *,
@@ -409,6 +431,8 @@ def search_hellowork(
     browser: Any = None,
     site: str = DEFAULT_SITE,
     profile: str = DEFAULT_PROFILE,
+    origin_location: str = "",
+    requested_radius: int = 0,
 ) -> list[SearchImportResult]:
     """Search HelloWork for offers matching query/location/contract.
 
@@ -427,7 +451,12 @@ def search_hellowork(
     relevant = [
         offer
         for offer in extracted
-        if _offer_is_relevant(offer, query=query)
+        if _offer_is_relevant(
+            offer,
+            query=query,
+            origin_location=origin_location,
+            requested_radius=requested_radius,
+        )
     ]
 
     return [_upsert_hellowork_offer(conn, offer, raw_html) for offer in relevant]
@@ -436,6 +465,7 @@ def search_hellowork(
 # ---------------------------------------------------------------------------
 # Saved search dispatch
 # ---------------------------------------------------------------------------
+
 
 def run_hellowork_saved_search(
     conn,
@@ -462,6 +492,8 @@ def run_hellowork_saved_search(
         browser=browser,
         site=site,
         profile=profile,
+        origin_location=saved["where_text"],
+        requested_radius=int(saved["requested_radius"] or saved["radius"]),
     )
     update_saved_search_last_run(conn, int(saved["id"]), _now())
     return results

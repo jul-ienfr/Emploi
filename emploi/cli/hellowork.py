@@ -28,7 +28,9 @@ def hellowork_apply(
     motivation: str = typer.Option("", "--motivation", help="Message de motivation explicite; vide = brouillon local"),
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
     no_kanban: bool = typer.Option(False, "--no-kanban", help="Ne pas créer/mettre à jour la carte Deck après envoi"),
-    ack_dissuasion: bool = typer.Option(False, "--ack-dissuasion", help="Confirme l'envoi malgré un avertissement compétences HelloWork"),
+    ack_dissuasion: bool = typer.Option(
+        False, "--ack-dissuasion", help="Confirme l'envoi malgré un avertissement compétences HelloWork"
+    ),
     kanban_stack: str = typer.Option("", "--kanban-stack", help="Alias/ID stack Deck candidature envoyée"),
     kanban_endpoint: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
     site: str = typer.Option(DEFAULT_SITE, "--site"),
@@ -89,8 +91,10 @@ def hellowork_apply(
 @hellowork_app.command("search")
 def hellowork_search(
     query: str = typer.Argument(..., help="Mots-clés de recherche"),
-    location: str = typer.Option("", "--location", "-l", help="Lieu"),
+    location: str = typer.Option("", "--location", "-l", help="Lieu (pour la recherche HW)"),
     contract: str = typer.Option("", "--contract", "-c", help="Type de contrat (CDI, CDD, etc.)"),
+    where: str = typer.Option("", "--where", "-w", help="Lieu d'origine pour filtre distance (ex: Bogève)"),
+    radius: int = typer.Option(0, "--radius", "-r", help="Rayon max en km depuis --where (0 = pas de filtre)"),
     site: str = typer.Option("hellowork", "--site"),
     profile: str = typer.Option("emploi-hellowork", "--profile"),
 ) -> None:
@@ -108,6 +112,8 @@ def hellowork_search(
                 browser=browser,
                 site=site,
                 profile=profile,
+                origin_location=where,
+                requested_radius=radius,
             )
     except ManagedBrowserError as error:
         _handle_browser_error(error)
