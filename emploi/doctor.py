@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from emploi import __version__
 from emploi import config as _config
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserError, ManagedBrowserUnavailableError
-from emploi.db import connect, db_path, init_db
+from emploi.db import DEFAULT_DB_PATH, connect, db_path, init_db
+
+# Emplacements où une base SQLite résiduelle peut traîner (artefacts d'anciennes versions).
+RESIDUAL_DB_LOCATIONS = (
+    Path.home() / ".config" / "emploi" / "emploi.sqlite",
+    Path.cwd() / "emploi.sqlite",
+)
 
 
 def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
@@ -14,12 +21,15 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     database = _check_database()
     accounts = _check_accounts()
     managed_browser = _check_managed_browser(probe=probe_browser)
+    residual_dbs = _check_residual_databases()
 
     managed_browser_ok = managed_browser["status"] == "ok" or (
         managed_browser["status"] == "available" and managed_browser.get("probe") == "skipped"
     )
     status = "ok"
     if database["status"] != "ok" or accounts["status"] != "ok" or not managed_browser_ok:
+        status = "degraded"
+    if residual_dbs["status"] != "ok":
         status = "degraded"
 
     actions: list[str] = []
@@ -28,9 +38,18 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
     if managed_browser["status"] == "missing":
         actions.append("Installer/configurer Managed Browser ou définir EMPLOI_MANAGED_BROWSER_COMMAND.")
     elif not managed_browser_ok:
-        actions.append("Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser (défaut: emploi-candidature/france-travail) est disponible et connecté.")
+        actions.append(
+            "Relancer `emploi browser smoke --json` et vérifier que le profil Managed Browser (défaut: emploi-candidature/france-travail) est disponible et connecté."
+        )
     if accounts.get("status") != "ok":
-        actions.append("Configurer les comptes France Travail : créer ~/.config/emploi/accounts.json avec les deux profils (candidature, officiel).")
+        actions.append(
+            "Configurer les comptes France Travail : créer ~/.config/emploi/accounts.json avec les deux profils (candidature, officiel)."
+        )
+    if residual_dbs["status"] != "ok":
+        paths = ", ".join(residual_dbs["residual"])
+        actions.append(
+            f"Base(s) SQLite résiduelle(s) détectée(s) : {paths}. La base canonique est {DEFAULT_DB_PATH}; supprimer l'artefact ou migrer les données avant suppression."
+        )
 
     return {
         "status": status,
@@ -38,8 +57,17 @@ def build_doctor_report(*, probe_browser: bool = True) -> dict[str, Any]:
         "database": database,
         "accounts": accounts,
         "managed_browser": managed_browser,
+        "residual_databases": residual_dbs,
         "recommended_actions": actions,
     }
+
+
+def _check_residual_databases() -> dict[str, Any]:
+    """Detect stray SQLite databases outside the canonical location."""
+    found = [str(path) for path in RESIDUAL_DB_LOCATIONS if path.exists()]
+    if not found:
+        return {"status": "ok", "residual": []}
+    return {"status": "warning", "residual": found}
 
 
 def _check_database() -> dict[str, Any]:

@@ -69,7 +69,9 @@ def test_doctor_json_no_browser_probe_skips_managed_browser_command(tmp_path, mo
     accounts_dir = tmp_path / "config" / "emploi"
     accounts_dir.mkdir(parents=True)
     (accounts_dir / "accounts.json").write_text(
-        json.dumps({"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"})
+        json.dumps(
+            {"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"}
+        )
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
@@ -94,7 +96,9 @@ def test_doctor_json_reports_healthy_browser_when_status_probe_succeeds(tmp_path
     accounts_dir = tmp_path / "config" / "emploi"
     accounts_dir.mkdir(parents=True)
     (accounts_dir / "accounts.json").write_text(
-        json.dumps({"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"})
+        json.dumps(
+            {"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"}
+        )
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
@@ -125,6 +129,7 @@ def test_doctor_json_reports_degraded_when_accounts_missing(tmp_path, monkeypatc
     db_path = tmp_path / "emploi.sqlite"
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
     # No accounts.json created → accounts missing
     # Also mock browser status so it doesn't block the test
     def fake_status(self, **kw):
@@ -177,7 +182,9 @@ def test_doctor_json_reports_shell_like_browser_command_when_status_probe_succee
     accounts_dir = tmp_path / "config" / "emploi"
     accounts_dir.mkdir(parents=True)
     (accounts_dir / "accounts.json").write_text(
-        json.dumps({"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"})
+        json.dumps(
+            {"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"}
+        )
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
@@ -207,7 +214,9 @@ def test_doctor_json_reports_browser_probe_error(tmp_path, monkeypatch):
     accounts_dir = tmp_path / "config" / "emploi"
     accounts_dir.mkdir(parents=True)
     (accounts_dir / "accounts.json").write_text(
-        json.dumps({"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"})
+        json.dumps(
+            {"profiles": {"candidature": "emploi-candidature", "officiel": "emploi-officiel"}, "default": "candidature"}
+        )
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
@@ -247,3 +256,38 @@ def test_doctor_text_is_human_readable(tmp_path, monkeypatch):
     assert "Base SQLite" in result.stdout
     assert "Managed Browser" in result.stdout
     assert "degraded" in result.stdout or "error" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Doctor: residual (stray) SQLite databases outside the canonical location
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_json_reports_ok_when_no_residual_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMPLOI_DB", str(tmp_path / "emploi.sqlite"))
+    monkeypatch.setattr("emploi.doctor._check_managed_browser", _missing_doctor_browser)
+    monkeypatch.setattr("emploi.doctor.RESIDUAL_DB_LOCATIONS", (tmp_path / "absent.sqlite",))
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["residual_databases"]["status"] == "ok"
+    assert payload["residual_databases"]["residual"] == []
+
+
+def test_doctor_json_warns_degraded_on_residual_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMPLOI_DB", str(tmp_path / "emploi.sqlite"))
+    monkeypatch.setattr("emploi.doctor._check_managed_browser", _missing_doctor_browser)
+    residual = tmp_path / "residual.sqlite"
+    residual.write_bytes(b"")
+    monkeypatch.setattr("emploi.doctor.RESIDUAL_DB_LOCATIONS", (residual,))
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "degraded"
+    assert payload["residual_databases"]["status"] == "warning"
+    assert str(residual) in payload["residual_databases"]["residual"]
+    assert any("résiduelle" in action for action in payload["recommended_actions"])
