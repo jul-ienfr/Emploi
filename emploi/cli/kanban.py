@@ -9,7 +9,7 @@ from rich.table import Table
 from emploi import config as emploi_config
 from emploi.cli import kanban_app, kanban_card_app
 from emploi.db import connect, init_db
-from emploi.nextcloud_deck import create_offer_card
+from emploi.nextcloud_deck import NextcloudDeckClient, create_offer_card
 
 console = Console(soft_wrap=True)
 
@@ -24,7 +24,9 @@ def kanban_set(
     password_pass: str = typer.Option("", "--password-pass", help="Entrée pass contenant le mot de passe/app password"),
     title: str = typer.Option("", "--title", help="Titre lisible du board"),
     api_base_path: str = typer.Option("/index.php/apps/deck/api/v1.0", "--api-base-path", help="Chemin API Deck"),
-    stack_options: Annotated[list[str] | None, typer.Option("--stack", help="Alias de colonne Deck au format alias=ID; répétable")] = None,
+    stack_options: Annotated[
+        list[str] | None, typer.Option("--stack", help="Alias de colonne Deck au format alias=ID; répétable")
+    ] = None,
     make_default: bool = typer.Option(False, "--default", help="Définir comme endpoint kanban par défaut"),
 ) -> None:
     """Enregistre un endpoint API Nextcloud Deck pour le suivi kanban emploi."""
@@ -96,8 +98,103 @@ def kanban_list(json_output: bool = typer.Option(False, "--json", help="Afficher
         return
     table = Table("Nom", "Défaut", "Board", "API stacks")
     for endpoint in endpoints:
-        table.add_row(endpoint["name"], endpoint.get("default", ""), str(endpoint["board_id"]), endpoint["api_stacks_url"])
+        table.add_row(
+            endpoint["name"], endpoint.get("default", ""), str(endpoint["board_id"]), endpoint["api_stacks_url"]
+        )
     console.print(table)
+
+
+@kanban_app.command("stacks")
+def kanban_stacks(
+    name: str = typer.Argument("", help="Nom de l'endpoint; vide = défaut"),
+    json_output: bool = typer.Option(False, "--json", help="Afficher en JSON"),
+) -> None:
+    """Liste les stacks du board Deck (lecture live via l'API)."""
+    endpoint = emploi_config.get_kanban_endpoint(name) if name else emploi_config.get_default_kanban_endpoint()
+    if endpoint is None:
+        message = "Aucun endpoint kanban configuré" if not name else f"Endpoint kanban introuvable: {name}"
+        if json_output:
+            console.print_json(data={"status": "missing", "message": message})
+        else:
+            console.print(message)
+        raise typer.Exit(1)
+    client = NextcloudDeckClient(endpoint)
+    stacks = client.list_stacks()
+    if json_output:
+        console.print_json(data={"endpoint": endpoint["name"], "stacks": stacks})
+        return
+    if not stacks:
+        console.print("Aucune stack trouvée sur ce board")
+        return
+    table = Table("ID", "Stack", "Cartes")
+    for stack in stacks:
+        cards = stack.get("cards")
+        if not isinstance(cards, list):
+            cards = []
+        table.add_row(str(stack.get("id", "")), str(stack.get("title", "")), str(len(cards)))
+    console.print(table)
+
+
+@kanban_app.command("move")
+def kanban_move(
+    card_id: int = typer.Argument(..., help="ID de la carte Deck"),
+    stack: str = typer.Option(..., "--stack", "--to", help="Alias ou ID de la stack de destination"),
+    endpoint_name: str = typer.Option("", "--endpoint", help="Endpoint kanban; vide = défaut"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser le déplacement sans appeler l'API"),
+) -> None:
+    """Déplace une carte Deck vers une autre stack (ex: candidature-envoyee → relance)."""
+    endpoint = (
+        emploi_config.get_kanban_endpoint(endpoint_name)
+        if endpoint_name
+        else emploi_config.get_default_kanban_endpoint()
+    )
+    if endpoint is None:
+        raise typer.BadParameter("Aucun endpoint kanban configuré. Utilise `emploi kanban set ...`.")
+    try:
+        stack_id = emploi_config.resolve_kanban_stack(endpoint, stack)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    if dry_run:
+        console.print(f"Dry-run : déplacerait la carte {card_id} → stack {stack_id}")
+        return
+    client = NextcloudDeckClient(endpoint)
+    card = client.find_card(card_id)
+    if card is None:
+        raise typer.BadParameter(f"Carte Deck introuvable sur ce board: {card_id}")
+    title = str(card.get("title") or "Carte")
+    order = int(card.get("order") or 999)  # type: ignore[call-overload]
+    moved = client.move_card(card_id=card_id, stack_id=stack_id, title=title, order=order)
+    moved_id = moved.get("id", card_id)
+    console.print(f"Carte déplacée : {moved_id} → stack {stack_id} ({title[:80]})")
+
+
+@kanban_card_app.command("add")
+def kanban_card_add(
+    title: str = typer.Argument(..., help="Titre de la carte"),
+    stack: str = typer.Option(..., "--stack", "--stack-id", help="Alias ou ID de la colonne/stack Deck cible"),
+    endpoint_name: str = typer.Option("", "--endpoint", help="Endpoint kanban; vide = défaut"),
+    description: str = typer.Option("", "--description", help="Description de la carte (texte libre)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans créer de carte"),
+) -> None:
+    """Crée une carte Deck manuelle (sans offre locale) dans la stack cible."""
+    endpoint = (
+        emploi_config.get_kanban_endpoint(endpoint_name)
+        if endpoint_name
+        else emploi_config.get_default_kanban_endpoint()
+    )
+    if endpoint is None:
+        raise typer.BadParameter("Aucun endpoint kanban configuré. Utilise `emploi kanban set ...`.")
+    try:
+        stack_id = emploi_config.resolve_kanban_stack(endpoint, stack)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    if dry_run:
+        console.print(f"Dry-run : créerait la carte « {title} » dans la stack {stack_id}")
+        return
+    client = NextcloudDeckClient(endpoint)
+    created = client.create_card(stack_id=stack_id, title=title, description=description)
+    card_id = created.get("id")
+    console.print(f"Carte créée : {card_id or 'id inconnu'} → stack {stack_id} ({title[:80]})")
 
 
 @kanban_card_app.command("add-offer")
@@ -105,12 +202,18 @@ def kanban_card_add_offer(
     offer_id: int,
     stack: str = typer.Option(..., "--stack", "--stack-id", help="Alias ou ID de la colonne/stack Deck cible"),
     endpoint_name: str = typer.Option("", "--endpoint", help="Endpoint kanban; vide = défaut"),
-    nextcloud_folder_url: str = typer.Option("", "--nextcloud-folder-url", help="Lien dossier Nextcloud à ajouter à la description"),
+    nextcloud_folder_url: str = typer.Option(
+        "", "--nextcloud-folder-url", help="Lien dossier Nextcloud à ajouter à la description"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Prévisualiser sans créer de carte"),
     force: bool = typer.Option(False, "--force", help="Créer une nouvelle carte même si un événement existe déjà"),
 ) -> None:
     """Prépare ou crée une carte Deck depuis une offre locale."""
-    endpoint = emploi_config.get_kanban_endpoint(endpoint_name) if endpoint_name else emploi_config.get_default_kanban_endpoint()
+    endpoint = (
+        emploi_config.get_kanban_endpoint(endpoint_name)
+        if endpoint_name
+        else emploi_config.get_default_kanban_endpoint()
+    )
     if endpoint is None:
         raise typer.BadParameter("Aucun endpoint kanban configuré. Utilise `emploi kanban set ...`.")
     try:

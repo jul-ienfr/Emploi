@@ -30,6 +30,10 @@ class DeckCardResult:
 class DeckClientProtocol(Protocol):
     def create_card(self, *, stack_id: int, title: str, description: str, order: int = 999) -> dict[str, object]: ...
 
+    def list_stacks(self) -> list[dict[str, object]]: ...
+
+    def move_card(self, *, card_id: int, stack_id: int, title: str, order: int = 999) -> dict[str, object]: ...
+
 
 class NextcloudDeckClient:
     def __init__(self, endpoint: dict[str, object], *, username: str = "", password: str = "") -> None:
@@ -72,6 +76,33 @@ class NextcloudDeckClient:
             "POST",
             f"/stacks/{int(stack_id)}/cards",
             {"title": title, "description": description, "type": "plain", "order": int(order)},
+        )
+
+    def list_stacks(self) -> list[dict[str, object]]:
+        """List the board's stacks (each with its cards)."""
+        result = self._request_json("GET", "/stacks", {})  # type: ignore[misc]
+        if isinstance(result, list):
+            return result
+        return []
+
+    def find_card(self, card_id: int) -> dict[str, object] | None:
+        """Locate a card by id across the board's stacks (to fetch its data)."""
+        target = int(card_id)
+        for stack in self.list_stacks():
+            cards = stack.get("cards")
+            if not isinstance(cards, list):
+                continue
+            for card in cards:
+                if int(card.get("id") or 0) == target:  # type: ignore[call-overload]
+                    return card
+        return None
+
+    def move_card(self, *, card_id: int, stack_id: int, title: str, order: int = 999) -> dict[str, object]:
+        # Nextcloud Deck moves a card to a stack via PUT on the target stack.
+        return self._request_json(  # type: ignore[misc]
+            "PUT",
+            f"/stacks/{int(stack_id)}/cards/{int(card_id)}",
+            {"title": title, "type": "plain", "order": int(order)},
         )
 
 
