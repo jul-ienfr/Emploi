@@ -139,7 +139,10 @@ emploi hellowork apply 1
 emploi hellowork apply 1 --submit --yes
 emploi hellowork apply 1 --submit --yes --kanban-stack candidature-envoyee
 emploi hellowork apply 1 --submit --yes --no-kanban
+emploi hellowork search "chauffeur PL" --location "Cluses" --where "Bogève" --radius 20
 ```
+
+`emploi hellowork search` recherche des offres HelloWork (scraping HTTP via le Managed Browser) avec filtres `--location`, `--contract`, `--where` (lieu d'origine) et `--radius` (rayon en km depuis `--where`, via `within_requested_radius`).
 
 `emploi hellowork apply` est en dry-run par défaut : il ouvre l'offre HelloWork, charge le formulaire, vérifie les champs requis et le CV, puis s'arrête sans POST final. Le POST réel n'est exécuté qu'avec `--submit --yes`; après confirmation HelloWork, le CLI enregistre `application_submitted`, passe la candidature locale en `sent`, et crée/réutilise une carte Deck dans la stack Kanban `candidature-envoyee` quand l'endpoint kanban est configuré. Les secrets et champs dynamiques sensibles comme `FunnelId` ne sont pas loggés. `--ack-dissuasion` permet de confirmer l'envoi malgré un avertissement compétences HelloWork.
 
@@ -194,6 +197,8 @@ Pour les rayons France Travail non proposés exactement, le CLI conserve le rayo
 Candidatures et pilotage opérateur :
 
 ```bash
+emploi daily                 # rituel quotidien : doctor → scan → brief → next
+emploi daily --no-run        # idem sans scanner les profils
 emploi apply 1
 emploi application draft 1
 emploi application list
@@ -204,7 +209,30 @@ emploi brief --json
 emploi report
 ```
 
-`emploi next` propose les prochaines actions utiles à partir des offres France Travail actives à fort score et des candidatures en brouillon/envoyées. `emploi brief` est le point quotidien recommandé : meilleures offres, actions prioritaires, relances dues, candidatures envoyées devenues stale, blockers (Managed Browser/profils) et stats 7 jours. `emploi brief --json` ne sort que du JSON parseable. `emploi report` conserve le résumé local historique plus des compteurs France Travail/browser-backed (offres FT, offres FT actives, brouillons, candidatures envoyées).
+`emploi daily` est le point d'entrée quotidien : diagnostic (`doctor`), scan des profils actifs (France Travail + HelloWork selon la source du profil), brief et prochaines actions — en une commande. `--no-run` saute le scan (brief sur les données existantes), `--no-probe-browser` saute le probe du Managed Browser, `--today YYYY-MM-DD` permet de rejouer une journée.
+
+`emploi next` propose les prochaines actions utiles à partir des offres actives à fort score et des candidatures en brouillon/envoyées. `emploi brief` est le point quotidien recommandé : meilleures offres (toutes sources, score ≥ 70), actions prioritaires, relances dues, candidatures envoyées devenues stale, blockers (Managed Browser/profils) et stats 7 jours **par source** (France Travail, HelloWork, APEC, CH…). `emploi brief --json` ne sort que du JSON parseable. `emploi report` conserve le résumé local historique plus des compteurs browser-backed.
+
+Recherche multi-sources :
+
+```bash
+emploi search-all "chauffeur PL" --country FR --max 20 --json
+emploi search-all "chauffeur PL" --country CH --export-csv offres_ch.csv
+```
+
+`emploi search-all` interroge les sources HTTP directes (FR : apec, monster, cadremploi ; CH : okjob, jobup, jobs_ch, comparis), déduplique et enregistre localement.
+
+Suivi Nextcloud — kanban et tâches :
+
+```bash
+emploi kanban stacks --json                       # liste live des stacks du board
+emploi kanban card add "Rappel relance" --stack envoyees --dry-run
+emploi kanban move CARD_ID --stack relance --dry-run
+emploi application interview add 1 --date "2026-08-20 14:30" --location "Agen" --dry-run
+emploi application task add "Préparer le dossier" --due 2026-09-01 --dry-run
+```
+
+`kanban stacks` lit les colonnes du board via l'API Deck ; `kanban card add` crée une carte manuelle sans offre liée ; `kanban move` déplace une carte existante vers une autre stack (ex. `candidature-envoyee` → `relance`). `application interview add` et `application task add` créent des VTODO CalDAV (entretien avec heure, tâche générique) — UID déterministes (idempotence), bornés par l'option `followups.enabled`.
 
 ## Workflow quotidien Julien
 
@@ -223,6 +251,29 @@ emploi ft apply <offer-id> --open
 2. Installer une fois les profils Julien par défaut, puis lancer les profils actifs pour rafraîchir France Travail.
 3. Lire `emploi brief` pour décider la journée: meilleures offres, relances et blockers; utiliser `emploi next` pour la liste d'actions détaillée.
 4. Pour candidater, rester en mode assisté: `--check`, brouillon local, ouverture navigateur; aucune soumission automatique.
+
+## Daemon de veille multi-sources
+
+```bash
+emploi search-profile watch --interval 30      # boucle toutes les 30 min
+emploi search-profile watch --interval 30 --once   # un seul cycle
+```
+
+À chaque cycle, le daemon exécute les profils actifs (France Travail + HelloWork, moteur résolu depuis la colonne `source` du profil) puis les sources suisses (CH, 10 par source) via `sources/aggregator`. Arrêt propre sur Ctrl+C (double signal = arrêt immédiat).
+
+Alertes (config par variables d'environnement) :
+
+- `EMPLOI_ALERT_WEBHOOK_URL` — POST JSON sur erreur de cycle (Slack, Telegram…) ;
+- `EMPLOI_ALERT_EMAIL_TO` / `EMPLOI_ALERT_EMAIL_FROM` — email via sendmail ;
+- `EMPLOI_ALERT_HIGH_SCORE=0` — désactive l'alerte « nouvelle offre à fort potentiel » (score ≥ 70, active par défaut).
+
+## Dashboard
+
+```bash
+emploi dashboard --host 0.0.0.0 --port 8050
+```
+
+Dashboard Flask (port par défaut 8050) avec 88 routes et 11 templates Jinja (offres, candidatures, stats, carte, comparaison, entreprise, profils, actions, PWA). Auth par variables d'environnement : `EMPLOI_DASHBOARD_API_KEY` (clé API, comparaison HMAC) et `EMPLOI_DASHBOARD_AUTH` (mot de passe), avec rate limit 100 req/min (`dashboard_auth.py`).
 
 ## Skill Hermes
 

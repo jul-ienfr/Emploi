@@ -1,5 +1,7 @@
 # Plan — intégration Nextcloud API pour le CLI Emploi
 
+> **Statut global : Phases 1-3 implémentées (2026-08-16), Phase 4 à faire quand le pipeline est stable.**
+
 Objectif : utiliser Nextcloud comme hub local de recherche d'emploi sans MCP, via APIs déterministes et testables.
 
 ## Décision
@@ -14,16 +16,18 @@ Objectif : utiliser Nextcloud comme hub local de recherche d'emploi sans MCP, vi
 
 État actuel : `emploi kanban set/show/list` sait enregistrer des boards Deck par profil métier.
 
-À ajouter :
+> **Statut : FAIT (2026-08-16)** — `kanban stacks`, `kanban card add`, `kanban move`, `kanban card add-offer` (push offre), mapping local via `offer_events` (event `nextcloud_deck_card`), tests avec faux client (`tests/test_kanban_deck_ops.py`, `tests/test_nextcloud_deck_cards.py`).
 
-1. Client Deck injecté/testable.
+À ajouter (historique) :
+
+1. Client Deck injecté/testable. ✅
 2. Commandes :
-   - `emploi kanban stacks [PROFILE] --json`
-   - `emploi kanban card add PROFILE --stack NAME --title TITLE [--description TEXT]`
-   - `emploi kanban offer push OFFER_ID --profile PROFILE [--stack "À Postuler"]`
-   - `emploi kanban move CARD_ID --profile PROFILE --to STACK`
-3. Mapping local offre ↔ carte Deck dans SQLite pour éviter les doublons.
-4. Tests avec faux client HTTP, pas d'appel réseau réel.
+   - `emploi kanban stacks [PROFILE] --json` ✅
+   - `emploi kanban card add PROFILE --stack NAME --title TITLE [--description TEXT]` ✅ (endpoint au lieu de PROFILE)
+   - `emploi kanban offer push OFFER_ID --profile PROFILE [--stack "À Postuler"]` ✅ (`kanban card add-offer OFFER_ID --stack`)
+   - `emploi kanban move CARD_ID --profile PROFILE --to STACK` ✅ (`--stack/--to`)
+3. Mapping local offre ↔ carte Deck dans SQLite pour éviter les doublons. ✅
+4. Tests avec faux client HTTP, pas d'appel réseau réel. ✅
 
 ## Phase 2 — Files / WebDAV
 
@@ -70,13 +74,15 @@ Comportement `application export` :
 
 But : relances et échéances.
 
+> **Statut : FAIT (2026-08-16)** — `application followup-schedule` / `followup-sync` (relances VTODO), `application interview add OFFER_ID --date "YYYY-MM-DD HH:MM" --location --notes`, `application task add TEXT --due DATE` (tâche générique). UID déterministes (idempotence PUT), événements `nextcloud_followup_task` / `nextcloud_interview_task` en local, option `followups.enabled` (`emploi option toggle followups.enabled`). Tests avec faux client CalDAV (`tests/test_interview_and_tasks.py`, `tests/test_nextcloud_tasks_sync.py`).
+
 Commandes :
 
-- `emploi followup schedule OFFER_ID --in 7d`
-- `emploi interview add OFFER_ID "YYYY-MM-DD HH:MM" --location TEXT`
-- `emploi task add TEXT --due DATE`
+- `emploi followup schedule OFFER_ID --in 7d` ✅ (`application followup-schedule OFFER_ID --after 7d`)
+- `emploi interview add OFFER_ID "YYYY-MM-DD HH:MM" --location TEXT` ✅ (`application interview add OFFER_ID --date ... --location`)
+- `emploi task add TEXT --due DATE` ✅ (`application task add TEXT --due DATE`)
 
-Stockage : références locales + UID CalDAV pour idempotence.
+Stockage : références locales + UID CalDAV pour idempotence. ✅
 
 ## Phase 4 — Contacts / Notes
 

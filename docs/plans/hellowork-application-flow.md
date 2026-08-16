@@ -3,6 +3,8 @@
 Date: 2026-05-06
 Offre inspectée: HelloWork `78282309` — Chauffeur Poids Lourd H/F, Slash Intérim, Bons-en-Chablais.
 
+> **Statut : garde-fous IMPLÉMENTÉS dans le code (2026-08-16)** — dry-run par défaut (`hellowork_apply_dry_run`, aucun POST sans `--submit --yes`), anti-doublon (`_ensure_not_already_submitted`), dissuasion compétences (`--ack-dissuasion`), secrets masqués des logs (FunnelId/email). **Revalidation live du tunnel (comportement CV/uploader + page de confirmation post-submit) toujours en attente** — à planifier avec une session réelle avant toute évolution du flux.
+
 ## Objectif
 
 Comprendre le tunnel HelloWork pour préparer une automatisation assistée depuis le projet `Emploi`, sans soumission automatique non maîtrisée.

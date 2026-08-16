@@ -1,6 +1,6 @@
 # Emploi CLI Next Evolution Phase Plan
 
-**Repo Path:** `/home/jul/Emploi`
+**Repo Path:** `/home/jul/projects/Emploi`
 **Concurrency:** 2
 **Parallel Mode:** safe
 **Validation Mode:** standard

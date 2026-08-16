@@ -15,7 +15,7 @@ Utilise cette skill quand Julien demande de travailler sur sa recherche d'emploi
 
 ## Principes importants
 
-- Le dépôt est généralement dans `/home/jul/Emploi`.
+- Le dépôt est généralement dans `/home/jul/projects/Emploi`.
 - La commande principale est `emploi` après installation editable, ou `python3 -m emploi.cli` depuis le dépôt.
 - Les données locales sont dans SQLite, par défaut `~/.local/share/emploi/emploi.sqlite`.
 - La variable `EMPLOI_DB` permet de viser une autre base.
@@ -28,7 +28,7 @@ Utilise cette skill quand Julien demande de travailler sur sa recherche d'emploi
 Depuis le dépôt :
 
 ```bash
-cd /home/jul/Emploi
+cd /home/jul/projects/Emploi
 python3 -m emploi.cli doctor --json
 ```
 
@@ -98,9 +98,12 @@ emploi hellowork apply 1 --submit --yes
 emploi hellowork apply 1 --submit --yes --ack-dissuasion
 emploi hellowork apply 1 --submit --yes --kanban-stack candidature-envoyee
 emploi hellowork apply 1 --submit --yes --no-kanban
+emploi hellowork search "chauffeur PL" --location "Cluses" --where "Bogève" --radius 20
 ```
 
 Règle : `emploi hellowork apply` lance un dry-run par défaut. Il ouvre l'offre HelloWork, extrait le formulaire, vérifie prénom/nom/email/CV/bouton submit et enregistre seulement `hellowork_apply_dry_run`. `--submit --yes` est requis pour envoyer réellement; après confirmation HelloWork, le CLI crée une application locale `sent`, ajoute l'événement `application_submitted`, passe l'offre en `sent`, puis crée/réutilise une carte Deck dans la stack `candidature-envoyee` via l'endpoint Kanban par défaut. `--ack-dissuasion` permet de passer outre un avertissement compétences HelloWork (FIMO, FCO, etc.). Utiliser `--no-kanban` uniquement si Julien demande de ne pas toucher au board. Ne jamais logger `FunnelId`, cookies, credentials ou payloads complets. Voir `references/hellowork-application-flow.md`.
+
+`emploi hellowork search` recherche sur HelloWork (scraping HTTP via le Managed Browser) avec filtres `--location`, `--contract`, `--where` (lieu d'origine) et `--radius` (filtre de distance par rapport à `--where`).
 
 ### Options opérateur globales
 
@@ -145,7 +148,16 @@ emploi next
 emploi report
 ```
 
-`emploi brief` est le briefing quotidien Julien : meilleures offres, actions prioritaires, relances dues, candidatures envoyées sans contact récent, blockers et stats 7 jours. Utiliser `emploi brief --json` quand un agent doit parser le résultat : la sortie doit rester du JSON pur, sans bruit Rich.
+Ou, en une seule commande (rituel quotidien complet) :
+
+```bash
+emploi daily            # doctor → scan profils → brief → prochaines actions
+emploi daily --no-run   # skip le scan (brief sur les données existantes)
+```
+
+`emploi brief` est le briefing quotidien Julien : meilleures offres (toutes sources, score ≥ 70), actions prioritaires, relances dues, candidatures envoyées sans contact récent, blockers et stats 7 jours **par source** (France Travail, HelloWork, APEC, CH…). Utiliser `emploi brief --json` quand un agent doit parser le résultat : la sortie doit rester du JSON pur, sans bruit Rich.
+
+Le daemon multi-sources (`emploi search-profile watch --interval N`) exécute à chaque cycle les profils actifs (France Travail + HelloWork selon la colonne `source` du profil) puis les sources suisses (CH, 10 par source) ; il alerte par webhook/email en cas d'erreur (`EMPLOI_ALERT_WEBHOOK_URL` / `EMPLOI_ALERT_EMAIL_TO`) et signale les nouvelles offres à fort potentiel (score ≥ 70, désactivable avec `EMPLOI_ALERT_HIGH_SCORE=0`).
 
 ### Candidatures, documents Nextcloud et pilotage opérateur
 ```bash
@@ -163,32 +175,35 @@ emploi document-profile set poids-lourd --cv PATH --cover-letter PATH --default
 emploi nextcloud-files set emploi --base-url URL --remote-root /Emploi --username-pass nextcloud/username --password-pass nextcloud/password --default
 emploi nextcloud-tasks set emploi --base-url URL --calendar tasks --username-pass nextcloud/username --password-pass nextcloud/password --default
 emploi kanban set chauffeur-pl --base-url URL --board-id BOARD_ID --username-pass nextcloud/username --password-pass nextcloud/password
+emploi kanban stacks --json                     # liste live des stacks du board
+emploi kanban move CARD_ID --stack relance --dry-run
+emploi kanban card add "Rappel relance" --stack envoyees --dry-run
 emploi application export 1 --to-nextcloud --dry-run --include-documents --document-profile poids-lourd
 emploi kanban card add-offer 1 --endpoint chauffeur-pl --stack-id STACK_ID --dry-run
 emploi application pipeline 1 --files-endpoint emploi --kanban-endpoint chauffeur-pl --stack-id STACK_ID --dry-run
+emploi application interview add 1 --date "2026-08-20 14:30" --location "Agen" --dry-run
+emploi application task add "Préparer le dossier" --due 2026-09-01 --dry-run
 emploi brief
 emploi next
 emploi report
 ```
 
-Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, WebDAV/Files pour les dossiers candidature, CalDAV/VTODO pour les tâches de relance. Les credentials restent dans `pass`; les fichiers de config locaux stockent seulement les noms d'entrées `pass`, jamais les secrets. Utiliser `--dry-run` avant tout upload WebDAV, création de carte Deck live ou synchronisation de tâche. `application pipeline` orchestre export Files + carte Deck et réutilise l'event `nextcloud_deck_card` existant sauf `--force-card`. Les relances automatiques restent sous contrôle opérateur : désactivées par défaut, activables avec `application followup-config enable --after 10d`, désactivables avec `disable`, et surchargées par run via `--schedule-followup/--no-schedule-followup` + `--followup-after`. La synchro Tasks est séparée et désactivée par défaut : `application followup-sync-config enable/disable`, `application followup-sync --dry-run`, ou pipeline avec `--sync-followup-task/--no-sync-followup-task`.
+Nextcloud est intégré via APIs directes déterministes : Deck pour le kanban, WebDAV/Files pour les dossiers candidature, CalDAV/VTODO pour les tâches de relance, entretiens et tâches génériques. Les credentials restent dans `pass`; les fichiers de config locaux stockent seulement les noms d'entrées `pass`, jamais les secrets. Utiliser `--dry-run` avant tout upload WebDAV, création de carte Deck live ou synchronisation de tâche. `application pipeline` orchestre export Files + carte Deck et réutilise l'event `nextcloud_deck_card` existant sauf `--force-card`. Les relances automatiques restent sous contrôle opérateur : désactivées par défaut, activables avec `application followup-config enable --after 10d`, désactivables avec `disable`, et surchargées par run via `--schedule-followup/--no-schedule-followup` + `--followup-after`. La synchro Tasks est séparée et désactivée par défaut : `application followup-sync-config enable/disable`, `application followup-sync --dry-run`, ou pipeline avec `--sync-followup-task/--no-sync-followup-task`. Les entretiens et tâches génériques (VTODO CalDAV) sont bornés par l'option `followups.enabled` (`emploi option toggle followups.enabled`).
 
 ## Workflow agent recommandé
 
 1. Vérifier le dépôt et l'état Git :
    ```bash
-   cd /home/jul/Emploi
+   cd /home/jul/projects/Emploi
    git status -sb
    ```
 2. Lancer le diagnostic :
    ```bash
    python3 -m emploi.cli doctor --json
    ```
-3. Si Julien demande une recherche France Travail :
-   - vérifier que Managed Browser est disponible ;
-   - installer les profils par défaut si besoin avec `emploi search-profile install-julien-defaults` ;
-   - exécuter `emploi search-profile run --all` ou `emploi ft search ...` ;
-   - finir par `emploi brief`, puis `emploi next` si des actions détaillées sont nécessaires.
+3. Si Julien demande une recherche :
+   - pour le rituel quotidien : `emploi daily` (doctor → scan profils → brief → prochaines actions) ;
+   - ou manuellement : vérifier que Managed Browser est disponible, installer les profils par défaut si besoin (`emploi search-profile install-julien-defaults`), exécuter `emploi search-profile run --all` ou `emploi ft search ...` ou `emploi search-all ...`, finir par `emploi brief` puis `emploi next` si des actions détaillées sont nécessaires.
 4. Pour une candidature assistée :
    - utiliser d'abord `emploi ft apply <id> --check` ;
    - puis éventuellement `emploi application draft <id>` ou `emploi ft apply <id> --draft` ;
