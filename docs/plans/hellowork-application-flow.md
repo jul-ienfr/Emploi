@@ -16,9 +16,19 @@ Ce qui a été vérifié en live (offre `81098172`, profil `emploi-candidature`)
 5. ✅ **CV requis par offre** : upload automatique implémenté — le CLI lit le CV (option `--cv`, sinon profil documents par défaut), le transmet en base64 dans l'expression, construit un `File` côté page et POST `multipart` vers `/fr-fr/uploadcv` **avec les en-têtes `Turbo-Frame: funnel-resume-uploader-frame` + `X-Requested-With` (sans eux → HTTP 400)** ; le `JweHashResume` de la réponse est injecté dans le formulaire principal (créé si absent). Validé en live : `cvPresent: true`.
 6. ❓ **Flux multi-étapes** : bouton « Continuer ma candidature » observé (step 1 = identité + CV + CGU + message). La page de confirmation post-submit n'a pas pu être observée (pas de soumission sans Julien).
 
-### Suite recommandée
-- Décider du pré-remplissage des champs identité (optionnel) ;
-- Valider ensemble un `--submit --yes` sur une offre réelle (champs remplis + CGU cochée dans le browser) pour confirmer la confirmation post-submit.
+### Étape « information complémentaire » (Smart Apply SAv2) — blocage constaté en live
+
+**Soumission réelle tentée le 2026-08-16 (offre 81098172, Temporis Interim)** avec identité + CV + CGU + OTP :
+
+1. ✅ POST du formulaire principal → accepté (codes OTP envoyés par email : 101505 puis 983585 — chaque POST du formulaire principal renvoie un NOUVEAU code ; les codes expirent ~10 min).
+2. ✅ Validation OTP (983585) → le tunnel avance.
+3. ❌ **Étape finale bloquée** : `funnel-smart-apply-form` → `POST /fr-fr/offres/postsav2formstepframeview` (« Temporis Interim a besoin d'une information complémentaire pour enregistrer votre candidature »). La grille de questions est **VIDE** et chaque POST renvoie la même étape avec un **nouveau FunnelId** → boucle infinie. Aucune candidature enregistrée dans « Mes candidatures » (47 existantes, aucune nouvelle), aucun mail de confirmation, offre devenue « plus disponible ».
+
+Hypothèses (à investiguer lors d'une prochaine session) :
+- Le contrôleur Stimulus `mutable` (event `product.preselect_question`, `data-controller="mutable forced-reload-guard"`) charge la question via un fetch que l'injection brute (`target.innerHTML`) ne déclenche pas — il faut laisser **Turbo** swapper le frame `offer-detail-step-frame` et attendre le chargement (clic natif sur « Postuler » + attente longue).
+- Ou la question du recruteur n'est pas configurée côté serveur (état transitoire de l'annonce, expirée entre-temps).
+
+À retenter : clic natif sur `button[data-cy="sav2SubmitButton"]` (soumission Turbo, pas fetch), attente 5-10 s, puis lecture de la question si le contrôleur `mutable` l'a chargée.
 
 ## Objectif
 
