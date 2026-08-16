@@ -34,6 +34,7 @@ class FakeBrowser:
         otp_confirm: bool = True,
         smart_apply_confirm_after: int = 1,
         smart_apply_question: bool = False,
+        fill_remaining: list[str] | None = None,
         main_submit_step: str = "otp",
         result_key: str = "result",
     ) -> None:
@@ -47,6 +48,7 @@ class FakeBrowser:
         self.smart_apply_confirm_after = smart_apply_confirm_after
         self.smart_apply_attempts = 0
         self.smart_apply_question = smart_apply_question
+        self.fill_remaining = fill_remaining if fill_remaining is not None else []
         self.main_submit_step = main_submit_step
         self.result_key = result_key
 
@@ -56,6 +58,11 @@ class FakeBrowser:
 
     def console_eval(self, expression: str, *, site: str, profile: str):
         self.expressions.append(expression)
+        if "SMART_APPLY_FILL" in expression:
+            return FakeBrowserResult(
+                {"filled": [], "remaining": list(self.fill_remaining)},
+                key=self.result_key,
+            )
         if "postsav2formstepframeview" in expression:
             self.smart_apply_attempts += 1
             confirmed = self.smart_apply_attempts >= self.smart_apply_confirm_after
@@ -636,4 +643,31 @@ def test_apply_hellowork_submit_smart_apply_stuck_reports_cleanly(tmp_path):
         )
 
     assert "Smart Apply" in str(excinfo.value)
+    assert list_applications(conn) == []
+
+
+def test_apply_hellowork_submit_smart_apply_missing_identity_reports(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(
+        confirm=False, main_submit_step="smart-apply", smart_apply_confirm_after=99, fill_remaining=["Votre téléphone"]
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+
+    assert "à renseigner" in str(excinfo.value)
+    assert "téléphone" in str(excinfo.value)
+    assert "identity set --phone" in str(excinfo.value)
     assert list_applications(conn) == []

@@ -418,7 +418,7 @@ def _is_otp_step(preview: str) -> bool:
 def _is_smart_apply_step(preview: str) -> bool:
     """True si la réponse demande une 'information complémentaire' (Smart Apply SAv2)."""
     text = str(preview or "").casefold()
-    return bool(re.search(r"information compl[ée]mentaire|besoin d'une information|postsav2", text))
+    return bool(re.search(r"informations? compl[ée]mentaires?|besoin d'une? information|postsav2", text))
 
 
 def _smart_apply_expression() -> str:
@@ -474,6 +474,49 @@ def _smart_apply_expression() -> str:
   }
   return JSON.stringify(out);
 })()
+"""
+
+
+def _smart_apply_fill_expression(identity: dict[str, str] | None = None) -> str:
+    """Pré-remplit les questions Smart Apply dont le libellé correspond à l'identité.
+
+    Marqueur ``SMART_APPLY_FILL`` pour le routage des tests. Retourne les champs
+    remplis et ceux restant à renseigner (à faire valider par l'utilisateur).
+    """
+    identity = identity or {}
+    identity_json = json.dumps(
+        {k: identity.get(k, "") for k in ("phone", "city", "postal_code", "address")}, ensure_ascii=False
+    )
+    return f"""
+(async () => {{
+  // SMART_APPLY_FILL
+  const identity = {identity_json};
+  const out = {{filled: [], remaining: []}};
+  const form = document.querySelector('#funnel-smart-apply-form');
+  if (!form) return JSON.stringify({{error: 'no smart-apply form'}});
+  const matches = [
+    [/t[ée]l[ée]phone/i, identity.phone],
+    [/ville/i, identity.city],
+    [/code postal/i, identity.postal_code],
+    [/adresse/i, identity.address]
+  ];
+  const filled = new Set();
+  form.querySelectorAll('input:not([type=hidden]), select, textarea').forEach(el => {{
+    const labelText = (el.placeholder || '') + ' ' + (el.id ? (((document.querySelector(`label[for="${{el.id}}"]`) || {{}}).innerText) || '') : '');
+    for (const [re, value] of matches) {{
+      if (value && re.test(labelText)) {{
+        el.value = value;
+        out.filled.push((labelText.trim() || el.name).slice(0, 60));
+        filled.add(el);
+        break;
+      }}
+    }}
+  }});
+  form.querySelectorAll('input:not([type=hidden]), select, textarea').forEach(el => {{
+    if (!filled.has(el) && !(el.value || '').trim()) out.remaining.push((el.placeholder || el.name || 'champ').slice(0, 60));
+  }});
+  return JSON.stringify(out);
+}})()
 """
 
 
@@ -793,18 +836,31 @@ def apply_hellowork(
             # contrôleur mutable charger la question) jusqu'à confirmation.
             last_preview = ""
             for attempt in range(3):
+                # pré-remplit les questions dont le libellé correspond à l'identité
+                try:
+                    fill = _json_from_browser_result(
+                        browser.console_eval(_smart_apply_fill_expression(identity), site=site, profile=profile)
+                    )
+                except Exception:
+                    fill = {}
                 smart_data = _json_from_browser_result(
                     browser.console_eval(_smart_apply_expression(), site=site, profile=profile)
                 )
                 data = smart_data
                 if data.get("confirmed"):
                     break
+                remaining = [str(item) for item in fill.get("remaining") or []]
+                if remaining:
+                    raise ValueError(
+                        "Question(s) du recruteur HelloWork à renseigner : "
+                        + ", ".join(remaining)
+                        + " — complète l'identité (emploi identity set --phone --address) ou réponds dans le navigateur"
+                    )
                 if int(data.get("questionInputs") or 0) > 0:
                     labels = ", ".join(str(label) for label in data.get("questionLabels") or [])
                     raise ValueError(
                         "Question du recruteur HelloWork non réponduable automatiquement"
                         + (f" : {labels}" if labels else "")
-                        + " — réponds-la dans le navigateur puis relance avec --otp-code si demandé"
                     )
                 preview = str(data.get("textPreview") or "")
                 if attempt > 0 and preview == last_preview:

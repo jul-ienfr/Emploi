@@ -14,20 +14,37 @@ def identity_set(
     firstname: str = typer.Option("", "--firstname", "-f", help="Prénom (vide = conservé)"),
     lastname: str = typer.Option("", "--lastname", "-l", help="Nom de famille (vide = conservé)"),
     email: str = typer.Option("", "--email", "-e", help="Email (vide = conservé)"),
+    phone: str = typer.Option("", "--phone", "-p", help="Téléphone (vide = conservé)"),
+    city: str = typer.Option("", "--city", help="Ville (vide = conservée)"),
+    postal_code: str = typer.Option("", "--postal-code", help="Code postal (vide = conservé)"),
+    address: str = typer.Option("", "--address", help="Adresse (vide = conservée)"),
 ) -> None:
     """Enregistre l'identité locale pour le pré-remplissage des candidatures.
 
     Stockée dans ~/.config/emploi/identity.json (jamais committée).
-    Utilisée par `emploi hellowork apply` pour remplir Firstname/Lastname/Email.
+    Utilisée par `emploi hellowork apply` pour remplir Firstname/Lastname/Email
+    et les questions Smart Apply du recruteur (téléphone, ville, code postal,
+    adresse) quand les libellés correspondent.
     """
     try:
-        identity = emploi_config.set_identity(firstname=firstname, lastname=lastname, email=email)
+        identity = emploi_config.set_identity(
+            firstname=firstname,
+            lastname=lastname,
+            email=email,
+            phone=phone,
+            city=city,
+            postal_code=postal_code,
+            address=address,
+        )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     console.print("Identité enregistrée :")
     console.print(f"  Prénom : {identity['firstname']}")
     console.print(f"  Nom    : {identity['lastname']}")
     console.print(f"  Email  : {identity['email']}")
+    console.print(f"  Tél.   : {identity['phone'] or '—'}")
+    console.print(f"  Ville  : {identity['city'] or '—'} {identity['postal_code'] or ''}".rstrip())
+    console.print(f"  Adresse: {identity['address'] or '—'}")
 
 
 @identity_app.command("show")

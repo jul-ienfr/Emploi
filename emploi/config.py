@@ -54,6 +54,9 @@ def _identity_file() -> Path:
 # ── identité (pré-remplissage candidatures) ────────────────────────────
 
 
+IDENTITY_FIELDS = ("firstname", "lastname", "email", "phone", "city", "postal_code", "address")
+
+
 def get_identity() -> dict[str, str]:
     """Identité locale pour le pré-remplissage des formulaires (HelloWork…).
 
@@ -61,21 +64,13 @@ def get_identity() -> dict[str, str]:
     (machine de l'utilisateur, jamais committées).
     """
     data = _load_json(_identity_file()) or {}
-    return {
-        "firstname": str(data.get("firstname", "") or "").strip(),
-        "lastname": str(data.get("lastname", "") or "").strip(),
-        "email": str(data.get("email", "") or "").strip(),
-    }
+    return {key: str(data.get(key, "") or "").strip() for key in IDENTITY_FIELDS}
 
 
-def set_identity(*, firstname: str = "", lastname: str = "", email: str = "") -> dict[str, str]:
+def set_identity(**kwargs: str) -> dict[str, str]:
     """Enregistre ou met à jour l'identité locale (les champs vides conservent l'existant)."""
     current = get_identity()
-    payload = {
-        "firstname": firstname.strip() or current["firstname"],
-        "lastname": lastname.strip() or current["lastname"],
-        "email": email.strip() or current["email"],
-    }
+    payload = {key: str(kwargs.get(key, "") or "").strip() or current[key] for key in IDENTITY_FIELDS}
     _write_json(_identity_file(), payload)
     return payload
 

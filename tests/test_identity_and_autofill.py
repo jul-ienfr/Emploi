@@ -20,16 +20,38 @@ runner = CliRunner()
 def test_identity_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
-    assert emploi_config.get_identity() == {"firstname": "", "lastname": "", "email": ""}
+    empty = emploi_config.get_identity()
+    assert empty == {
+        "firstname": "",
+        "lastname": "",
+        "email": "",
+        "phone": "",
+        "city": "",
+        "postal_code": "",
+        "address": "",
+    }
 
-    saved = emploi_config.set_identity(firstname="Julien", lastname="Frendo-Rossi", email="julien@example.test")
-    assert saved == {"firstname": "Julien", "lastname": "Frendo-Rossi", "email": "julien@example.test"}
+    saved = emploi_config.set_identity(
+        firstname="Julien",
+        lastname="Frendo-Rossi",
+        email="julien@example.test",
+        phone="0600000000",
+        city="Bogève",
+        postal_code="74250",
+        address="1 rue du Lac",
+    )
+    assert saved["firstname"] == "Julien"
+    assert saved["phone"] == "0600000000"
+    assert saved["city"] == "Bogève"
+    assert saved["postal_code"] == "74250"
+    assert saved["address"] == "1 rue du Lac"
 
     # mise à jour partielle : les champs vides conservent l'existant
     updated = emploi_config.set_identity(email="autre@example.test")
     assert updated["firstname"] == "Julien"
     assert updated["lastname"] == "Frendo-Rossi"
     assert updated["email"] == "autre@example.test"
+    assert updated["phone"] == "0600000000"
 
     assert emploi_config.get_identity() == updated
 
