@@ -46,6 +46,7 @@ nextcloud_files_app = typer.Typer(help="Endpoint Nextcloud Files/WebDAV pour les
 nextcloud_tasks_app = typer.Typer(help="Endpoint Nextcloud Tasks/CalDAV pour les relances emploi")
 contacts_app = typer.Typer(help="Endpoint Nextcloud Contacts/CardDAV pour les recruteurs")
 journal_app = typer.Typer(help="Journal candidature Nextcloud (entrées datées)")
+identity_app = typer.Typer(help="Identité locale pour le pré-remplissage des candidatures")
 app.add_typer(offer_app, name="offer")
 app.add_typer(application_app, name="application")
 app.add_typer(browser_app, name="browser")
@@ -62,6 +63,7 @@ app.add_typer(nextcloud_files_app, name="nextcloud-files")
 app.add_typer(nextcloud_tasks_app, name="nextcloud-tasks")
 app.add_typer(contacts_app, name="contact")
 app.add_typer(journal_app, name="journal")
+app.add_typer(identity_app, name="identity")
 console = Console(soft_wrap=True)
 
 
@@ -330,6 +332,7 @@ import emploi.cli.doctor  # noqa: E402, F401
 import emploi.cli.document_profile  # noqa: E402, F401
 import emploi.cli.ft  # noqa: E402, F401
 import emploi.cli.hellowork  # noqa: E402, F401
+import emploi.cli.identity  # noqa: E402, F401
 import emploi.cli.import_  # noqa: E402, F401
 import emploi.cli.kanban  # noqa: E402, F401
 import emploi.cli.nextcloud  # noqa: E402, F401

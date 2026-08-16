@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from emploi import config as emploi_config
 from emploi.browser.client import ManagedBrowserClient
 from emploi.browser.errors import ManagedBrowserError
 from emploi.browser.models import DEFAULT_PROFILE, DEFAULT_SITE
@@ -33,6 +34,9 @@ def hellowork_apply(
     ),
     kanban_stack: str = typer.Option("", "--kanban-stack", help="Alias/ID stack Deck candidature envoyée"),
     kanban_endpoint: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
+    cv: str = typer.Option(
+        "", "--cv", help="Chemin du CV à uploader automatiquement; vide = profil documents par défaut"
+    ),
     site: str = typer.Option(DEFAULT_SITE, "--site"),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
@@ -41,6 +45,12 @@ def hellowork_apply(
         console.print("[red]Error:[/red] --submit HelloWork exige --yes pour confirmer l'envoi réel")
         raise typer.Exit(1)
     _ensure_option_enabled("managed_browser.enabled")
+    identity = emploi_config.get_identity()
+    cv_path = cv or ""
+    if not cv_path:
+        document_profile = emploi_config.get_default_document_profile()
+        if document_profile:
+            cv_path = str(document_profile.get("cv_path") or "")
     try:
         browser = ManagedBrowserClient()
         with connect() as conn:
@@ -59,6 +69,8 @@ def hellowork_apply(
                 kanban_stack=kanban_stack,
                 kanban_endpoint=kanban_endpoint,
                 ack_dissuasion=ack_dissuasion,
+                identity=identity,
+                cv_path=cv_path or None,
             )
     except ManagedBrowserError as error:
         _handle_browser_error(error)

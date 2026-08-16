@@ -17,7 +17,8 @@ emploi hellowork apply OFFER_ID --submit --yes --no-kanban
 - Default mode is dry-run: open the HelloWork URL, fetch the application form from browser context, validate required fields/CV, and stop before final POST.
 - Real application submission requires explicit `--submit --yes`.
 - `--ack-dissuasion` is required when HelloWork displays a dissuasion warning (e.g. missing FIMO/FCO skills); without it, the submission is blocked before any POST.
-- **CGU consent** (revalidated 2026-08-16) : le formulaire contient un champ requis `HasAcceptedCGU`. Le CLI refuse toute soumission si la case n'est pas cochée et ne la coche jamais lui-même. Les champs identité (Firstname/LastName/Email) ne sont plus pré-remplis côté serveur ; un formulaire avec identité vide est refusé proprement en dry-run.
+- **CGU consent** (revalidated 2026-08-16) : le formulaire contient un champ requis `HasAcceptedCGU`. Le CLI refuse toute soumission si la case n'est pas cochée et ne la coche jamais lui-même.
+- **Auto-fill identité + CV** (implémenté 2026-08-16, validé en dry-run live) : Firstname/LastName/Email sont pré-remplis depuis `~/.config/emploi/identity.json` (`emploi identity set`), et le CV (`--cv` ou profil documents par défaut) est uploadé via `POST /fr-fr/uploadcv` (multipart, en-têtes `Turbo-Frame: funnel-resume-uploader-frame` + `X-Requested-With` obligatoires) puis son `JweHashResume` est injecté dans le formulaire principal.
 - Never log or commit secrets, cookies, `FunnelId`, email values, local CV paths, or full POST payloads.
 - Do not fallback from a failed form extraction to blind clicking.
 - Use the existing `france-travail` / candidature Managed Browser context unless the operator passes another site/profile.

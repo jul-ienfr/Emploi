@@ -47,6 +47,39 @@ def _nextcloud_contacts_endpoints_file() -> Path:
     return _emploi_config_dir() / "nextcloud_contacts.json"
 
 
+def _identity_file() -> Path:
+    return _emploi_config_dir() / "identity.json"
+
+
+# ── identité (pré-remplissage candidatures) ────────────────────────────
+
+
+def get_identity() -> dict[str, str]:
+    """Identité locale pour le pré-remplissage des formulaires (HelloWork…).
+
+    Données personnelles stockées dans ``~/.config/emploi/identity.json``
+    (machine de l'utilisateur, jamais committées).
+    """
+    data = _load_json(_identity_file()) or {}
+    return {
+        "firstname": str(data.get("firstname", "") or "").strip(),
+        "lastname": str(data.get("lastname", "") or "").strip(),
+        "email": str(data.get("email", "") or "").strip(),
+    }
+
+
+def set_identity(*, firstname: str = "", lastname: str = "", email: str = "") -> dict[str, str]:
+    """Enregistre ou met à jour l'identité locale (les champs vides conservent l'existant)."""
+    current = get_identity()
+    payload = {
+        "firstname": firstname.strip() or current["firstname"],
+        "lastname": lastname.strip() or current["lastname"],
+        "email": email.strip() or current["email"],
+    }
+    _write_json(_identity_file(), payload)
+    return payload
+
+
 # ── accounts (profiles) ───────────────────────────────────────────────
 
 

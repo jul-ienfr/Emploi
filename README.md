@@ -139,12 +139,14 @@ emploi hellowork apply 1
 emploi hellowork apply 1 --submit --yes
 emploi hellowork apply 1 --submit --yes --kanban-stack candidature-envoyee
 emploi hellowork apply 1 --submit --yes --no-kanban
+emploi identity set --firstname "Julien" --lastname "Frendo-Rossi" --email "j@mail.fr"
+emploi hellowork apply 1 --cv /chemin/vers/CV.pdf
 emploi hellowork search "chauffeur PL" --location "Cluses" --where "Bogève" --radius 20
 ```
 
 `emploi hellowork search` recherche des offres HelloWork (scraping HTTP via le Managed Browser) avec filtres `--location`, `--contract`, `--where` (lieu d'origine) et `--radius` (rayon en km depuis `--where`, via `within_requested_radius`).
 
-`emploi hellowork apply` est en dry-run par défaut : il ouvre l'offre HelloWork, charge le formulaire, vérifie les champs requis et le CV, puis s'arrête sans POST final. Le POST réel n'est exécuté qu'avec `--submit --yes`; après confirmation HelloWork, le CLI enregistre `application_submitted`, passe la candidature locale en `sent`, et crée/réutilise une carte Deck dans la stack Kanban `candidature-envoyee` quand l'endpoint kanban est configuré. Les secrets et champs dynamiques sensibles comme `FunnelId` ne sont pas loggés. `--ack-dissuasion` permet de confirmer l'envoi malgré un avertissement compétences HelloWork.
+`emploi hellowork apply` est en dry-run par défaut : il ouvre l'offre HelloWork, charge le formulaire, vérifie les champs requis et le CV, puis s'arrête sans POST final. Depuis août 2026, HelloWork ne pré-remplit plus l'identité : le CLI pré-remplit Firstname/Lastname/Email depuis `~/.config/emploi/identity.json` (`emploi identity set`) et uploads le CV automatiquement (`--cv`, sinon le profil documents par défaut) via l'endpoint `uploadcv` (multipart, en-têtes Turbo-Frame requis) en injectant le `JweHashResume` dans le formulaire. Le POST réel n'est exécuté qu'avec `--submit --yes`; après confirmation HelloWork, le CLI enregistre `application_submitted`, passe la candidature locale en `sent`, et crée/réutilise une carte Deck dans la stack Kanban `candidature-envoyee` quand l'endpoint kanban est configuré. Les secrets et champs dynamiques sensibles comme `FunnelId` ne sont pas loggés. `--ack-dissuasion` permet de confirmer l'envoi malgré un avertissement compétences HelloWork.
 
 Imports multi-sources sans scraping direct :
 

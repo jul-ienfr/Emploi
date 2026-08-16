@@ -9,7 +9,10 @@ from typing import Any, Protocol
 from emploi import config as emploi_config
 from emploi.applications import DEFAULT_DRAFTS_DIR
 from emploi.db import add_application, add_offer_event, get_offer, list_offer_events, update_offer_status
+from emploi.logging import get_logger
 from emploi.nextcloud_deck import DeckCardResult, create_offer_card
+
+logger = get_logger("hellowork")
 
 HELLOWORK_INITIAL_FORM_PATH = "/fr-fr/offres/getinitialformframeview"
 HELLOWORK_FINAL_POST_PATH = "/fr-fr/offres/postcandidateinformationfromstepframeview"
@@ -188,11 +191,22 @@ def _js_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _inspect_expression(offer_external_id: str, motivation: str) -> str:
+def _inspect_expression(
+    offer_external_id: str,
+    motivation: str,
+    *,
+    identity: dict[str, str] | None = None,
+    cv_b64: str = "",
+    cv_name: str = "",
+) -> str:
+    identity = identity or {}
     return f"""
 (async () => {{
   const offerId = {_js_string(offer_external_id)};
   const motivation = {_js_string(motivation)};
+  const identity = {json.dumps({k: identity.get(k, "") for k in ("firstname", "lastname", "email")}, ensure_ascii=False)};
+  const cvB64 = {_js_string(cv_b64)};
+  const cvName = {_js_string(cv_name)};
   const out = {{url: location.href, offerExternalId: offerId}};
   const initialUrl = `/fr-fr/offres/getinitialformframeview?offerId=${{encodeURIComponent(offerId)}}&ts=${{Date.now()}}`;
   const initialResponse = await fetch(initialUrl, {{credentials: 'include', headers: {{'Turbo-Frame': 'funnel-frame'}}}});
@@ -208,6 +222,17 @@ def _inspect_expression(offer_external_id: str, motivation: str) -> str:
     form = document.querySelector('#offer-detail-main-step-form') || document.querySelector('form');
   }}
   const getValue = (name) => form ? (form.querySelector(`[name="${{name}}"]`)?.value || '') : '';
+  if (form) {{
+    const setField = (name, value) => {{
+      if (!value) return;
+      const el = form.querySelector(`[name="${{name}}"]`);
+      if (el) el.value = value;
+    }};
+    setField('Firstname', identity.firstname);
+    setField('Lastname', identity.lastname);
+    setField('LastName', identity.lastname);
+    setField('Email', identity.email);
+  }}
   out.formPresent = !!form;
   out.funnelIdPresent = !!getValue('FunnelId');
   out.firstnamePresent = !!getValue('Firstname');
@@ -240,6 +265,44 @@ def _inspect_expression(offer_external_id: str, motivation: str) -> str:
   out.cvPresent = uploadedCvElements.some((element) => /\\.pdf|cv|curriculum/i.test(
     element.textContent + ' ' + element.getAttribute('href') + ' ' + element.getAttribute('value')
   ));
+  if (cvB64 && !out.cvPresent) {{
+    try {{
+      const bin = atob(cvB64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const file = new File([bytes], cvName || 'cv.pdf', {{type: 'application/pdf'}});
+      const fd = new FormData();
+      fd.append('upload', file);
+      fd.append('uploaderApp', '41');
+      fd.append('uploaderType', 'RO');
+      const upRes = await fetch('/fr-fr/uploadcv?formId=offer-detail-main-step-form&isRequired=True', {{method: 'POST', credentials: 'include', body: fd, headers: {{'Turbo-Frame': 'funnel-resume-uploader-frame', 'X-Requested-With': 'XMLHttpRequest'}}}});
+      const upText = await upRes.text();
+      out.cvUploadStatus = upRes.status;
+      let hash = '';
+      try {{ const j = JSON.parse(upText); hash = j.jweHashResume || j.resumeHash || j.hash || ''; }} catch (e) {{ /* html */ }}
+      if (!hash) {{
+        const upDoc = new DOMParser().parseFromString(upText, 'text/html');
+        const hashInput = upDoc.querySelector('[name="JweHashResume"]');
+        hash = hashInput ? (hashInput.value || '') : '';
+      }}
+      if (hash) {{
+        let target = document.querySelector('[name="JweHashResume"]') || (form ? form.querySelector('[name="JweHashResume"]') : null);
+        if (!target && form) {{
+          target = document.createElement('input');
+          target.type = 'hidden';
+          target.name = 'JweHashResume';
+          form.appendChild(target);
+        }}
+        if (target) target.value = hash;
+        out.cvUploaded = true;
+        out.cvPresent = true;
+      }} else {{
+        out.cvUploadError = ((upText.match(/<title>(.*?)<\\/title>/) || [])[1] || upText.slice(0, 120)).trim();
+      }}
+    }} catch (err) {{
+      out.cvUploadError = String(err).slice(0, 200);
+    }}
+  }}
   out.cvTextPreview = cvText.slice(0, 240);
   out.dissuasionRequired = /postcertificationdissuasionformstepframeview|compétences? (?:absentes?|manquantes?)/i.test(initialHtml + ' ' + document.body.innerText);
   const skills = Array.from((initialHtml + ' ' + document.body.innerText).matchAll(/(?:FIMO|FCO|Carte de conducteur)/gi)).map(m => m[0]);
@@ -249,10 +312,12 @@ def _inspect_expression(offer_external_id: str, motivation: str) -> str:
 """
 
 
-def _submit_expression(offer_external_id: str, motivation: str) -> str:
+def _submit_expression(offer_external_id: str, motivation: str, *, identity: dict[str, str] | None = None) -> str:
+    identity = identity or {}
     return f"""
 (async () => {{
   const motivation = {_js_string(motivation)};
+  const identity = {json.dumps({k: identity.get(k, "") for k in ("firstname", "lastname", "email")}, ensure_ascii=False)};
   const out = {{urlBefore: location.href}};
   let form = document.querySelector('#offer-detail-main-step-form');
   if (!form) {{
@@ -266,6 +331,15 @@ def _submit_expression(offer_external_id: str, motivation: str) -> str:
   if (!form) throw new Error('HelloWork form missing');
   const field = form.querySelector('[name="MotivationLetter"]');
   if (field && motivation) field.value = motivation;
+  const setField = (name, value) => {{
+    if (!value) return;
+    const el = form.querySelector(`[name="${{name}}"]`);
+    if (el) el.value = value;
+  }};
+  setField('Firstname', identity.firstname);
+  setField('Lastname', identity.lastname);
+  setField('LastName', identity.lastname);
+  setField('Email', identity.email);
   let responseText = '';
   const submitResponse = await fetch(form.action || '/fr-fr/offres/postcandidateinformationfromstepframeview', {{
     method: 'POST', credentials: 'include', body: new FormData(form),
@@ -285,6 +359,26 @@ def _submit_expression(offer_external_id: str, motivation: str) -> str:
 """
 
 
+CV_MAX_BYTES = 1_900_000  # HelloWork: 2 Mo max — marge de sécurité
+
+
+def _load_cv_base64(cv_path: str | Path | None) -> tuple[str, str]:
+    """Lit un CV local en base64 pour l'upload automatique ("" si aucun/refusé)."""
+    if not cv_path:
+        return "", ""
+    path = Path(cv_path).expanduser()
+    if not path.exists():
+        logger.warning("CV introuvable: %s", path)
+        return "", ""
+    size = path.stat().st_size
+    if size > CV_MAX_BYTES:
+        logger.warning("CV trop volumineux (%d o, max %d) — upload automatique ignoré", size, CV_MAX_BYTES)
+        return "", ""
+    import base64
+
+    return base64.b64encode(path.read_bytes()).decode("ascii"), path.name
+
+
 def inspect_hellowork_form(
     conn,
     offer_id: int,
@@ -295,6 +389,8 @@ def inspect_hellowork_form(
     drafts_dir: str | None = None,
     site: str,
     profile: str,
+    identity: dict[str, str] | None = None,
+    cv_path: str | Path | None = None,
 ) -> HelloWorkFormState:
     resolved_url = resolve_hellowork_url(conn, offer_id, url)
     offer_external_id = _extract_hellowork_offer_id(resolved_url)
@@ -302,8 +398,20 @@ def inspect_hellowork_form(
         raise ValueError(f"ID offre HelloWork introuvable dans l'URL: {resolved_url}")
     browser.lifecycle_open(resolved_url, site=site, profile=profile)
     final_motivation = motivation if motivation else _read_draft_message(offer_id, drafts_dir=drafts_dir)
+    resolved_identity = identity if identity is not None else emploi_config.get_identity()
+    cv_b64, cv_name = _load_cv_base64(cv_path)
     data = _json_from_browser_result(
-        browser.console_eval(_inspect_expression(offer_external_id, final_motivation), site=site, profile=profile)
+        browser.console_eval(
+            _inspect_expression(
+                offer_external_id,
+                final_motivation,
+                identity=resolved_identity,
+                cv_b64=cv_b64,
+                cv_name=cv_name,
+            ),
+            site=site,
+            profile=profile,
+        )
     )
     if int(data.get("initialStatus") or 0) >= 400:
         raise ValueError(f"HelloWork form inaccessible: HTTP {data.get('initialStatus')}")
@@ -418,6 +526,8 @@ def apply_hellowork(
     kanban_stack: str = "",
     kanban_endpoint: str = "",
     ack_dissuasion: bool = False,
+    identity: dict[str, str] | None = None,
+    cv_path: str | Path | None = None,
 ) -> HelloWorkApplyResult:
     if submit:
         _ensure_not_already_submitted(conn, offer_id)
@@ -430,6 +540,8 @@ def apply_hellowork(
         drafts_dir=drafts_dir,
         site=site,
         profile=profile,
+        identity=identity,
+        cv_path=cv_path,
     )
     if not form.required_fields_present:
         missing = []
@@ -509,7 +621,9 @@ def apply_hellowork(
         )
     final_motivation = motivation if motivation else _read_draft_message(offer_id, drafts_dir=drafts_dir)
     data = _json_from_browser_result(
-        browser.console_eval(_submit_expression(form.offer_external_id, final_motivation), site=site, profile=profile)
+        browser.console_eval(
+            _submit_expression(form.offer_external_id, final_motivation, identity=identity), site=site, profile=profile
+        )
     )
     if not data.get("confirmed"):
         raise ValueError("Confirmation HelloWork non détectée après soumission")

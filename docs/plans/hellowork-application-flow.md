@@ -3,7 +3,7 @@
 Date: 2026-05-06
 Offre inspectée: HelloWork `78282309` — Chauffeur Poids Lourd H/F, Slash Intérim, Bons-en-Chablais.
 
-> **Statut : REVALIDATION LIVE PARTIELLE (2026-08-16, offre réelle 81098172)** — voir « Résultats de la revalidation » ci-dessous. Le dry-run fonctionne de bout en bout (ouverture → inspection → refus propre si champs manquants). **La soumission réelle (`--submit --yes`) reste à valider par Julien** (champs identité à renseigner + CGU à cocher + consentement explicite).
+> **Statut : AUTOFILL IMPLÉMENTÉ ET VALIDÉ EN DRY-RUN LIVE (2026-08-16, offre réelle 81098172)** — voir « Résultats de la revalidation » ci-dessous. Le dry-run est désormais **complet de bout en bout** : identité pré-remplie automatiquement (`identity.json`), CV uploadé automatiquement (`/fr-fr/uploadcv` + `JweHashResume`), formulaire `ready`, aucun envoi. **La soumission réelle (`--submit --yes`) reste à valider par Julien** (cocher la case CGU dans le browser + consentement explicite).
 
 ## Résultats de la revalidation (2026-08-16)
 
@@ -12,8 +12,8 @@ Ce qui a été vérifié en live (offre `81098172`, profil `emploi-candidature`)
 1. ✅ **Endpoints stables** : `getinitialformframeview` (HTTP 200) et `GetUploaderCvFrameView` (HTTP 200) répondent toujours.
 2. 🐛 **Bug corrigé — parsing des réponses console_eval** : le serveur imbrique la valeur sous `result.result` (replay step) ; `hellowork.py` lisait l'ancien format et ne voyait **jamais** les champs en live (le dry-run remontait « FunnelId manquant » à tort). Aligné sur `flows._eval_value` (legacy `value`/`raw`/chaîne directe conservés). Vérifié en live : FunnelId et bouton submit sont désormais détectés.
 3. 🆕 **Champ `HasAcceptedCGU` requis** (consentement CGU) ajouté au formulaire principal. Garde-fou ajouté : le CLI refuse toute soumission si la case n'est pas cochée et **ne la coche jamais lui-même** (message clair, aucun POST).
-4. ❌ **Prénom/Nom/Email ne sont plus pré-remplis** dans le HTML injecté (`value=""`) — le CLI refuse donc proprement (dry-run « Formulaire incomplet: Firstname, Lastname, Email, CV »). Décision à prendre : pré-remplir depuis le profil local (document_profiles) ou laisser l'utilisateur saisir.
-5. ❌ **CV requis par offre** : l'uploader exige un fichier (`required`, 2 Mo, pdf/doc/…), `cvPresent=false` — pas d'upload automatique (confirmé, hors périmètre du CLI).
+4. ✅ **Prénom/Nom/Email ne sont plus pré-remplis par HelloWork** — le CLI les pré-remplit désormais automatiquement depuis `~/.config/emploi/identity.json` (`emploi identity set --firstname --lastname --email`), en injectant les valeurs dans le formulaire avant lecture/soumission. Validé en live : `firstnamePresent/lastnamePresent/emailPresent: true`.
+5. ✅ **CV requis par offre** : upload automatique implémenté — le CLI lit le CV (option `--cv`, sinon profil documents par défaut), le transmet en base64 dans l'expression, construit un `File` côté page et POST `multipart` vers `/fr-fr/uploadcv` **avec les en-têtes `Turbo-Frame: funnel-resume-uploader-frame` + `X-Requested-With` (sans eux → HTTP 400)** ; le `JweHashResume` de la réponse est injecté dans le formulaire principal (créé si absent). Validé en live : `cvPresent: true`.
 6. ❓ **Flux multi-étapes** : bouton « Continuer ma candidature » observé (step 1 = identité + CV + CGU + message). La page de confirmation post-submit n'a pas pu être observée (pas de soumission sans Julien).
 
 ### Suite recommandée
