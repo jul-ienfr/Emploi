@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from emploi.monitoring import report_cycle_result, send_alert
+from emploi.monitoring import report_cycle_result, report_new_high_score_offers, send_alert
 
 
 def test_send_alert_no_configured_channels():
@@ -72,3 +72,35 @@ def test_report_cycle_result_includes_duration():
         )
         details = mock_alert.call_args[1]["details"]
         assert "123.4s" in details
+
+
+def test_report_new_high_score_offers_sends_alert_for_good_offers():
+    offers = [
+        {"offer_id": 1, "title": "CDI Python", "score": 85, "url": "https://ex.test/1"},
+        {"offer_id": 2, "title": "CDD agent", "score": 50, "url": ""},
+        {"offer_id": 3, "title": "Chauffeur PL", "score": 70, "url": "https://ex.test/3"},
+    ]
+    with patch("emploi.monitoring.send_alert") as mock_alert:
+        report_new_high_score_offers(offers)
+        mock_alert.assert_called_once()
+        args = mock_alert.call_args
+        assert "fort potentiel" in args.kwargs["title"]
+        assert "CDI Python" in args.kwargs["details"]
+        assert "Chauffeur PL" in args.kwargs["details"]
+        assert "CDD agent" not in args.kwargs["details"]
+        assert args.kwargs["level"] == "info"
+
+
+def test_report_new_high_score_offers_no_alert_when_nothing_interesting():
+    offers = [{"offer_id": 2, "title": "CDD agent", "score": 40, "url": ""}]
+    with patch("emploi.monitoring.send_alert") as mock_alert:
+        report_new_high_score_offers(offers)
+        mock_alert.assert_not_called()
+
+
+def test_report_new_high_score_offers_respects_disable_env(monkeypatch):
+    monkeypatch.setenv("EMPLOI_ALERT_HIGH_SCORE", "0")
+    offers = [{"offer_id": 1, "title": "CDI Python", "score": 90, "url": ""}]
+    with patch("emploi.monitoring.send_alert") as mock_alert:
+        report_new_high_score_offers(offers)
+        mock_alert.assert_not_called()

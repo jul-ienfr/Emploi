@@ -21,7 +21,7 @@ from emploi.db import add_offer, connect, init_db, list_saved_searches
 from emploi.france_travail.flows import run_saved_search
 from emploi.hellowork_search import run_hellowork_saved_search
 from emploi.logging import get_logger
-from emploi.monitoring import report_cycle_result, send_alert
+from emploi.monitoring import report_cycle_result, report_new_high_score_offers, send_alert
 
 logger = get_logger("daemon")
 
@@ -57,6 +57,7 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> tuple[int, i
     created = 0
     updated = 0
     errors: list[str] = []
+    high_score_new: list[dict[str, object]] = []
     for saved in profiles:
         try:
             source = str(saved["source"]) if "source" in saved.keys() else "all"
@@ -69,6 +70,16 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> tuple[int, i
                 total += len(results)
                 created += sum(1 for r in results if r.created)
                 updated += sum(1 for r in results if not r.created)
+                high_score_new.extend(
+                    {
+                        "offer_id": int(r.offer_id),
+                        "title": str(r.title),
+                        "score": int(r.score),
+                        "url": str(r.browser_url or ""),
+                    }
+                    for r in results
+                    if r.created
+                )
                 _print(f"  {saved['name']} ({src}): {len(results)} offre(s) traitée(s)")
                 logger.info("Profil %s (%s): %d offre(s)", saved["name"], src, len(results))
         except Exception as exc:
@@ -89,6 +100,7 @@ def _run_all_profiles(conn: Connection, site: str, profile: str) -> tuple[int, i
 
     _print(f"Total: {total} offre(s) — créée(s): {created} — mise(s) à jour: {updated}")
     logger.info("Cycle terminé: total=%d created=%d updated=%d errors=%d", total, created, updated, len(errors))
+    report_new_high_score_offers(high_score_new)
     return total, created, updated, errors
 
 

@@ -1,9 +1,11 @@
 """Daemon monitoring — alert on failures via email or webhook.
 
 Configured via environment variables:
-    EMPLOI_ALERT_WEBHOOK_URL   – POST JSON payload on failure (Slack, Telegram, etc.)
-    EMPLOI_ALERT_EMAIL_TO      – Send email on failure (requires sendmail)
-    EMPLOI_ALERT_EMAIL_FROM    – Sender address (default: emploi@localhost)
+    EMPLOI_ALERT_WEBHOOK_URL    – POST JSON payload on failure (Slack, Telegram, etc.)
+    EMPLOI_ALERT_EMAIL_TO       – Send email on failure (requires sendmail)
+    EMPLOI_ALERT_EMAIL_FROM     – Sender address (default: emploi@localhost)
+    EMPLOI_ALERT_HIGH_SCORE     – Alert on newly created offers with score >= 70
+                                 (default: enabled; set to 0/false to disable)
 """
 
 from __future__ import annotations
@@ -76,6 +78,36 @@ def _send_email(title: str, details: str) -> None:
         logger.debug("sendmail not available, skipping email alert")
     except Exception as exc:
         logger.warning("Failed to send email alert: %s", exc)
+
+
+HIGH_SCORE_ALERT_THRESHOLD = 70
+
+
+def high_score_alerts_enabled() -> bool:
+    raw = os.environ.get("EMPLOI_ALERT_HIGH_SCORE", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
+def report_new_high_score_offers(offers: list[dict[str, Any]]) -> None:
+    """Alert on newly created offers with a score above the threshold.
+
+    ``offers`` items must have: offer_id, title, score, url (best effort).
+    Silently skips when alerts are disabled or no channel is configured.
+    """
+    if not high_score_alerts_enabled():
+        return
+    interesting = [offer for offer in offers if int(offer.get("score") or 0) >= HIGH_SCORE_ALERT_THRESHOLD]
+    if not interesting:
+        return
+    lines = [
+        f"- #{offer['offer_id']} {offer['title']} (score {offer['score']}) — {offer.get('url') or 'sans lien'}"
+        for offer in interesting
+    ]
+    send_alert(
+        title=f"Nouvelle(s) offre(s) à fort potentiel: {len(interesting)}",
+        details="\n".join(lines),
+        level="info",
+    )
 
 
 def report_cycle_result(
