@@ -400,6 +400,63 @@ def _is_otp_step(preview: str) -> bool:
     )
 
 
+def _is_smart_apply_step(preview: str) -> bool:
+    """True si la réponse demande une 'information complémentaire' (Smart Apply SAv2)."""
+    text = str(preview or "").casefold()
+    return bool(re.search(r"information compl[ée]mentaire|besoin d'une information|postsav2", text))
+
+
+def _smart_apply_expression() -> str:
+    """Soumet l'étape Smart Apply (postsav2formstepframeview).
+
+    Injecte la réponse via le swap Turbo (frame id de la réponse) pour que les
+    contrôleurs Stimulus (``mutable``) se connectent et chargent la question du
+    recruteur, attend le chargement, puis rapporte : confirmation, question
+    visible (à faire valider par l'utilisateur) ou étape inchangée.
+    """
+    return r"""
+(async () => {
+  const out = {urlBefore: location.href};
+  let form = document.querySelector('#funnel-smart-apply-form') ||
+             Array.from(document.querySelectorAll('form')).find(f => /postsav2formstepframeview/.test(f.getAttribute('action') || ''));
+  if (!form) throw new Error('Formulaire Smart Apply HelloWork introuvable');
+  const submitResponse = await fetch(form.getAttribute('action') || '/fr-fr/offres/postsav2formstepframeview', {
+    method: 'POST', credentials: 'include', body: new FormData(form),
+    headers: {'Turbo-Frame': 'funnel-frame', 'X-Requested-With': 'XMLHttpRequest'}
+  });
+  out.submitStatus = submitResponse.status;
+  const responseText = await submitResponse.text();
+  const doc = new DOMParser().parseFromString(responseText, 'text/html');
+  const respFrame = doc.querySelector('turbo-frame');
+  let target = null;
+  if (respFrame) {
+    const live = document.querySelector(`turbo-frame[id="${respFrame.id}"]`);
+    if (live) { live.innerHTML = respFrame.innerHTML; target = live; }
+  }
+  if (!target) {
+    target = document.querySelector('#funnel-frame') || document.body;
+    target.innerHTML = responseText;
+  }
+  // laisse le contrôleur mutable (question du recruteur) se charger
+  await new Promise(r => setTimeout(r, 4000));
+  const text = document.body ? document.body.innerText.replace(/\s+/g, ' ') : '';
+  out.urlAfter = location.href;
+  out.confirmed = /candidature\s+est\s+envoy|candidature\s+envoy/i.test(text);
+  out.textPreview = text.slice(0, 500);
+  const qform = document.querySelector('#funnel-smart-apply-form');
+  if (qform) {
+    const extra = Array.from(qform.querySelectorAll('input:not([type=hidden]), select, textarea'));
+    out.questionInputs = extra.length;
+    out.questionLabels = Array.from(qform.querySelectorAll('label, legend, p, span')).map(el => (el.innerText || '').trim().slice(0, 120)).filter(Boolean).slice(0, 6);
+  } else {
+    out.questionInputs = 0;
+    out.questionLabels = [];
+  }
+  return JSON.stringify(out);
+})()
+"""
+
+
 def _otp_expression(offer_external_id: str, otp_code: str) -> str:
     """Valide le code OTP reçu par email (formulaire postotpformstepframeview)."""
     return f"""
@@ -705,7 +762,35 @@ def apply_hellowork(
             if not otp_data.get("confirmed"):
                 raise ValueError("Code de vérification HelloWork refusé ou confirmation non détectée après validation")
             data = otp_data
-        else:
+        if not data.get("confirmed") and _is_smart_apply_step(str(data.get("textPreview") or "")):
+            # Étape 'information complémentaire' (Smart Apply SAv2) : le recruteur
+            # demande une info. On soumet l'étape (swap Turbo pour laisser le
+            # contrôleur mutable charger la question) jusqu'à confirmation.
+            last_preview = ""
+            for attempt in range(3):
+                smart_data = _json_from_browser_result(
+                    browser.console_eval(_smart_apply_expression(), site=site, profile=profile)
+                )
+                data = smart_data
+                if data.get("confirmed"):
+                    break
+                if int(data.get("questionInputs") or 0) > 0:
+                    labels = ", ".join(str(label) for label in data.get("questionLabels") or [])
+                    raise ValueError(
+                        "Question du recruteur HelloWork non réponduable automatiquement"
+                        + (f" : {labels}" if labels else "")
+                        + " — réponds-la dans le navigateur puis relance avec --otp-code si demandé"
+                    )
+                preview = str(data.get("textPreview") or "")
+                if attempt > 0 and preview == last_preview:
+                    break  # l'étape n'avance plus
+                last_preview = preview
+            if not data.get("confirmed"):
+                raise ValueError(
+                    "Étape Smart Apply HelloWork non finalisée (information complémentaire sans confirmation) — "
+                    + (str(data.get("textPreview") or "")[:120])
+                )
+        elif not data.get("confirmed"):
             raise ValueError("Confirmation HelloWork non détectée après soumission")
     application_id = _record_sent_application(conn, offer_id, notes="Candidature envoyée via HelloWork")
     add_offer_event(

@@ -32,6 +32,9 @@ class FakeBrowser:
         cgu_consent_required: bool = True,
         cgu_consent_checked: bool = True,
         otp_confirm: bool = True,
+        smart_apply_confirm_after: int = 1,
+        smart_apply_question: bool = False,
+        main_submit_step: str = "otp",
         result_key: str = "result",
     ) -> None:
         self.opened: list[str] = []
@@ -41,6 +44,10 @@ class FakeBrowser:
         self.otp_confirm = otp_confirm
         self.cgu_consent_required = cgu_consent_required
         self.cgu_consent_checked = cgu_consent_checked
+        self.smart_apply_confirm_after = smart_apply_confirm_after
+        self.smart_apply_attempts = 0
+        self.smart_apply_question = smart_apply_question
+        self.main_submit_step = main_submit_step
         self.result_key = result_key
 
     def lifecycle_open(self, url: str, *, site: str, profile: str):
@@ -49,6 +56,21 @@ class FakeBrowser:
 
     def console_eval(self, expression: str, *, site: str, profile: str):
         self.expressions.append(expression)
+        if "postsav2formstepframeview" in expression:
+            self.smart_apply_attempts += 1
+            confirmed = self.smart_apply_attempts >= self.smart_apply_confirm_after
+            return FakeBrowserResult(
+                {
+                    "submitStatus": 200,
+                    "confirmed": confirmed,
+                    "textPreview": "Votre candidature est envoyée"
+                    if confirmed
+                    else "Temporis Interim a besoin d'une information complémentaire pour enregistrer votre candidature",
+                    "questionInputs": 1 if self.smart_apply_question else 0,
+                    "questionLabels": ["Avez-vous le permis EC ?"] if self.smart_apply_question else [],
+                },
+                key=self.result_key,
+            )
         if "postotpformstepframeview" in expression:
             return FakeBrowserResult(
                 {
@@ -67,7 +89,11 @@ class FakeBrowser:
                     "confirmed": self.confirm,
                     "textPreview": "Votre candidature est envoyée, vous allez être redirigé·e"
                     if self.confirm
-                    else "Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé à j@mail.fr",
+                    else (
+                        "Temporis Interim a besoin d'une information complémentaire pour enregistrer votre candidature"
+                        if self.main_submit_step == "smart-apply"
+                        else "Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé à j@mail.fr"
+                    ),
                 },
                 key=self.result_key,
             )
@@ -521,3 +547,93 @@ def test_apply_hellowork_submit_finalizes_with_otp_code(tmp_path):
     apps = list_applications(conn)
     assert len(apps) == 1
     assert apps[0]["status"] == "sent"
+
+
+# ---------------------------------------------------------------------------
+# Étape Smart Apply (SAv2) — information complémentaire du recruteur
+# ---------------------------------------------------------------------------
+
+
+def test_is_smart_apply_step_detection():
+    from emploi.hellowork import _is_smart_apply_step
+
+    assert _is_smart_apply_step(
+        "Temporis Interim a besoin d'une information complémentaire pour enregistrer votre candidature"
+    )
+    assert not _is_smart_apply_step("Est-ce bien votre email ?")
+
+
+def test_apply_hellowork_submit_smart_apply_finalizes_after_loop(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    # le POST principal mène à l'étape smart-apply ; la 2e soumission confirme
+    browser = FakeBrowser(confirm=False, main_submit_step="smart-apply", smart_apply_confirm_after=2)
+
+    result = apply_hellowork(
+        conn,
+        offer_id,
+        browser=browser,
+        submit=True,
+        site="france-travail",
+        profile="emploi-candidature",
+        kanban=False,
+    )
+
+    assert result.submitted is True
+    smart_exprs = [e for e in browser.expressions if "postsav2formstepframeview" in e]
+    assert len(smart_exprs) == 2
+    apps = list_applications(conn)
+    assert len(apps) == 1
+    assert apps[0]["status"] == "sent"
+
+
+def test_apply_hellowork_submit_smart_apply_question_requires_manual_answer(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(
+        confirm=False, main_submit_step="smart-apply", smart_apply_confirm_after=99, smart_apply_question=True
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+
+    assert "Question du recruteur" in str(excinfo.value)
+    assert "permis EC" in str(excinfo.value)
+    assert list_applications(conn) == []
+
+
+def test_apply_hellowork_submit_smart_apply_stuck_reports_cleanly(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(confirm=False, main_submit_step="smart-apply", smart_apply_confirm_after=99)
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+
+    assert "Smart Apply" in str(excinfo.value)
+    assert list_applications(conn) == []
