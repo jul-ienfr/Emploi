@@ -33,7 +33,7 @@ emploi/
 ├── monitoring.py           # alertes webhook/email
 ├── doctor.py               # rapport de santé (ok/degraded)
 ├── brief.py                # brief quotidien
-├── dashboard.py            # dashboard Flask (monolithe, 88 routes) + _dashboard_ui/
+├── dashboard.py            # factory Flask (setup + health) ; routes dans dashboard_app/
 ├── nextcloud_deck.py       # kanban Deck
 ├── nextcloud_files.py      # WebDAV (dossiers candidature)
 └── nextcloud_tasks.py      # CalDAV VTODO (relances)

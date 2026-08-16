@@ -273,7 +273,7 @@ Alertes (config par variables d'environnement) :
 emploi dashboard --host 0.0.0.0 --port 8050
 ```
 
-Dashboard Flask (port par défaut 8050) avec 88 routes et 11 templates Jinja (offres, candidatures, stats, carte, comparaison, entreprise, profils, actions, PWA). Auth par variables d'environnement : `EMPLOI_DASHBOARD_API_KEY` (clé API, comparaison HMAC) et `EMPLOI_DASHBOARD_AUTH` (mot de passe), avec rate limit 100 req/min (`dashboard_auth.py`).
+Dashboard Flask (port par défaut 8050) avec 88 routes et 11 templates Jinja (offres, candidatures, stats, carte, comparaison, entreprise, profils, actions, PWA). Les routes vivent dans des blueprints (`emploi/dashboard_app/` : `pages`, `api_offers`, `api_misc` + helpers dans `common.py`) ; `dashboard.py` n'est plus qu'une factory. Auth par variables d'environnement : `EMPLOI_DASHBOARD_API_KEY` (clé API, comparaison HMAC) et `EMPLOI_DASHBOARD_AUTH` (mot de passe), avec rate limit 100 req/min (`dashboard_auth.py`).
 
 ## Skill Hermes
 
