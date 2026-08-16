@@ -380,6 +380,8 @@ def _submit_expression(
   out.urlAfter = location.href;
   out.confirmed = /candidature\\s+est\\s+envoy|candidature\\s+envoy/i.test(text);
   out.textPreview = text.replace(/\\s+/g, ' ').slice(0, 500);
+  const funnelEl = document.querySelector('#funnel-frame');
+  out.frameText = (funnelEl ? funnelEl.innerText || '' : '').replace(/\\s+/g, ' ').slice(0, 800);
   return JSON.stringify(out);
 }})()
 """
@@ -554,6 +556,8 @@ def _otp_expression(offer_external_id: str, otp_code: str) -> str:
   out.urlAfter = location.href;
   out.confirmed = /candidature\\s+est\\s+envoy|candidature\\s+envoy/i.test(text);
   out.textPreview = text.replace(/\\s+/g, ' ').slice(0, 500);
+  const funnelEl = document.querySelector('#funnel-frame');
+  out.frameText = (funnelEl ? funnelEl.innerText || '' : '').replace(/\\s+/g, ' ').slice(0, 800);
   return JSON.stringify(out);
 }})()
 """
@@ -812,7 +816,8 @@ def apply_hellowork(
     if not data.get("confirmed"):
         # Étape de vérification email (OTP) : le formulaire est accepté, un code
         # a été envoyé à l'utilisateur — la candidature n'est pas encore envoyée.
-        preview = str(data.get("textPreview") or "")
+        # Le texte utile peut être dans le frame funnel (hors preview tronqué).
+        preview = str(data.get("textPreview") or "") + " " + str(data.get("frameText") or "")
         if _is_otp_step(preview):
             if not otp_code:
                 raise ValueError(
@@ -830,7 +835,7 @@ def apply_hellowork(
             if not otp_data.get("confirmed"):
                 raise ValueError("Code de vérification HelloWork refusé ou confirmation non détectée après validation")
             data = otp_data
-        if not data.get("confirmed") and _is_smart_apply_step(str(data.get("textPreview") or "")):
+        if not data.get("confirmed") and _is_smart_apply_step(preview):
             # Étape 'information complémentaire' (Smart Apply SAv2) : le recruteur
             # demande une info. On soumet l'étape (swap Turbo pour laisser le
             # contrôleur mutable charger la question) jusqu'à confirmation.
