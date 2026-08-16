@@ -42,6 +42,15 @@ Observations clés du succès :
 - **Le POST a abouti SANS upload CV** (le CV est attaché au compte, pas besoin de JweHashResume pour ce tunnel ; `cvPresent` reste vrai dans l'uploader).
 - Les funnels varient par offre : direct (98), OTP (63), smart-apply (62/60), CGU présent/absent — le CLI gère les trois, la confirmation directe reste la plus simple.
 
+### Constat final sur les tunnels smart-apply (2026-08-16, 4 recruteurs testés)
+
+- **Direct (sans étape) : FONCTIONNE** — offre 80750290 (Ortec Group) envoyée ✅. Le POST principal → « Votre candidature est envoyée ».
+- **OTP : FONCTIONNE** — code lu dans la webmail, tunnel avancé ✅.
+- **Dissuasion** (« compétences précises ») : le POST/le clic re-rendent l'étape — boucle (offre 74311789 Ortec Annecy). Détection + gestion implémentées (commit `a21d069`), mais le serveur ne confirme pas.
+- **Smart-apply** (« informations complémentaires ») : même boucle avec valeurs VALIDES (téléphone normalisé sans espaces — validation passée, étape re-rendue quand même). Testé sur Temporis (80808238), GT Solutions, Adequat (offres 101/102). Le pré-remplissage des champs est vérifié dans le DOM ; le serveur re-rend l'étape à chaque POST (fetch ET clic natif form-validator).
+
+Conclusion : le CLI couvre tous les chemins (direct, OTP, dissuasion, smart-apply) avec diagnostics propres ; les tunnels smart-apply/dissuasion semblent bloqués côté HelloWork (probablement une exigence non visible du tunnel — questions recruteur non publiées ou étape nécessitant un écran interactif). Pour ces offres, compléter à la main dans le navigateur (champs déjà pré-remplis par le CLI en dry-run).
+
 ### Dernier état (2026-08-16, offre 80808238 Temporis Contamine) — validation du pré-remplissage
 
 Le flux complet est désormais validé jusqu'au POST smart-apply inclus :
