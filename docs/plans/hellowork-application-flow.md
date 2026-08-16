@@ -34,6 +34,14 @@ Progrès (2026-08-16, commit `76d0394`) :
 
 À retenter sur une **offre fraîche** (issue du scan quotidien) avec la gestion Smart Apply implémentée (`_smart_apply_expression`, boucle 3 essais, frame créé) : si la grille de questions se remplit (contrôleur mutable connecté), le CLI le signalera (`questionLabels`) pour réponse manuelle ; sinon il rapportera l'étape bloquée proprement.
 
+### Dernier état (2026-08-16, offre 80808238 Temporis Contamine) — validation du pré-remplissage
+
+Le flux complet est désormais validé jusqu'au POST smart-apply inclus :
+- ✅ **Détection** : le texte utile est dans `#funnel-frame` (hors preview 500 o) — `frameText` ajouté aux expressions et utilisé par les deux détections (bug ligne 838 corrigé, commit `72d2507`).
+- ✅ **Pré-remplissage vérifié dans le DOM** : `sav2_field1..4` = « 06 99 85 69 48 », « Bogève », « 74250 », « 96 route du croue » (extraits du CV par `pdftotext` puis `emploi identity set`).
+- ⚠️ **Le POST smart-apply re-rend l'étape** (questions vides, nouveau FunnelId) — le serveur ne confirme pas. Les tunnels **expirent** entre les tentatives (« Votre session a expiré »). Ni Temporis ni AFTRAL n'ont abouti (« Mes candidatures » vérifié : aucune nouvelle).
+- Piste restante : les valeurs remplies doivent peut-être transiter par le contrôleur `form-validator` (fetch sérialisé maison) plutôt que `FormData(form)` brut — à investiguer sur une offre fraîche.
+
 ## Objectif
 
 Comprendre le tunnel HelloWork pour préparer une automatisation assistée depuis le projet `Emploi`, sans soumission automatique non maîtrisée.
