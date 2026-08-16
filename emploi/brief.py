@@ -13,8 +13,10 @@ def build_brief(conn, *, today: str | None = None, limit: int = 5) -> dict[str, 
     today_text = today_date.isoformat()
     since_text = (today_date - timedelta(days=6)).isoformat()
 
-    best_offers = [_offer_to_dict(row) for row in conn.execute(
-        """
+    best_offers = [
+        _offer_to_dict(row)
+        for row in conn.execute(
+            """
         SELECT * FROM offers
         WHERE score >= 70
           AND is_active = 1
@@ -22,12 +24,15 @@ def build_brief(conn, *, today: str | None = None, limit: int = 5) -> dict[str, 
         ORDER BY score DESC, id DESC
         LIMIT ?
         """,
-        (limit,),
-    ).fetchall()]
+            (limit,),
+        ).fetchall()
+    ]
 
     actions = list_next_actions(conn, limit=limit, today=today_text)
-    due_followups = [_application_offer_to_dict(row) for row in conn.execute(
-        """
+    due_followups = [
+        _application_offer_to_dict(row)
+        for row in conn.execute(
+            """
         SELECT applications.id AS application_id, applications.next_action_at,
                offers.id AS offer_id, offers.title, offers.company, offers.score
         FROM applications
@@ -38,11 +43,14 @@ def build_brief(conn, *, today: str | None = None, limit: int = 5) -> dict[str, 
         ORDER BY date(applications.next_action_at) ASC, offers.score DESC, applications.id DESC
         LIMIT ?
         """,
-        (today_text, limit),
-    ).fetchall()]
+            (today_text, limit),
+        ).fetchall()
+    ]
 
-    stale_sent = [_application_offer_to_dict(row) for row in conn.execute(
-        """
+    stale_sent = [
+        _application_offer_to_dict(row)
+        for row in conn.execute(
+            """
         SELECT applications.id AS application_id,
                COALESCE(NULLIF(applications.last_contact_at, ''), applications.applied_at) AS due_date,
                offers.id AS offer_id, offers.title, offers.company, offers.score
@@ -54,19 +62,23 @@ def build_brief(conn, *, today: str | None = None, limit: int = 5) -> dict[str, 
                  offers.score DESC, applications.id DESC
         LIMIT ?
         """,
-        (today_text, limit),
-    ).fetchall()]
+            (today_text, limit),
+        ).fetchall()
+    ]
 
     blockers = _build_blockers(conn)
 
     weekly_stats = {
         "since": since_text,
         "offers_created": _count(conn, "SELECT COUNT(*) FROM offers WHERE date(created_at) >= date(?)", (since_text,)),
-        "applications_created": _count(conn, "SELECT COUNT(*) FROM applications WHERE date(applied_at) >= date(?)", (since_text,)),
+        "applications_created": _count(
+            conn, "SELECT COUNT(*) FROM applications WHERE date(applied_at) >= date(?)", (since_text,)
+        ),
         "drafts": _count(conn, "SELECT COUNT(*) FROM applications WHERE status = 'draft'"),
         "sent": _count(conn, "SELECT COUNT(*) FROM applications WHERE status = 'sent'"),
         "followups_due": len(due_followups),
         "stale_sent": len(stale_sent),
+        "by_source": _offers_by_source(conn, since_text),
     }
 
     return {
@@ -82,6 +94,21 @@ def build_brief(conn, *, today: str | None = None, limit: int = 5) -> dict[str, 
 
 def _count(conn, query: str, params: tuple[object, ...] = ()) -> int:
     return int(conn.execute(query, params).fetchone()[0])
+
+
+def _offers_by_source(conn, since_text: str) -> dict[str, int]:
+    """Répartition des offres créées depuis une date, par source (FT, HelloWork, CH…)."""
+    rows = conn.execute(
+        """
+        SELECT COALESCE(external_source, source) AS src, COUNT(*) AS n
+        FROM offers
+        WHERE date(created_at) >= date(?)
+        GROUP BY src
+        ORDER BY n DESC, src ASC
+        """,
+        (since_text,),
+    ).fetchall()
+    return {str(row["src"]): int(row["n"]) for row in rows}
 
 
 def _offer_to_dict(row) -> dict[str, Any]:

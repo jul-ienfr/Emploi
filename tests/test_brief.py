@@ -13,8 +13,10 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def _browser_unavailable(monkeypatch):
     """Simulate Managed Browser being down so brief reports it as a blocker."""
+
     def _raise(*a, **kw):
         raise ManagedBrowserUnavailableError("test: server not running")
+
     monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", _raise)
 
 
@@ -71,6 +73,7 @@ def test_brief_json_is_parseable_and_summarizes_daily_work(tmp_path, monkeypatch
     assert "Managed Browser indisponible" in payload["blockers"][0]
     assert "Aucun profil de recherche actif" in payload["blockers"][1]
     assert payload["weekly_stats"]["offers_created"] >= 1
+    assert payload["weekly_stats"]["by_source"].get("france-travail", 0) >= 1
 
 
 def test_brief_readable_output_shows_best_actions_followups_blockers_and_stats(tmp_path, monkeypatch):
@@ -97,3 +100,26 @@ def test_brief_readable_output_shows_best_actions_followups_blockers_and_stats(t
     assert "Blockers" in result.stdout
     assert "Managed Browser indisponible" in result.stdout
     assert "Stats 7 jours" in result.stdout
+
+
+def test_brief_weekly_stats_breakdown_by_source(tmp_path, monkeypatch):
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    conn = connect(db_path)
+    init_db(conn)
+    add_offer(conn, title="CDD agent", company="Co1", external_source="france-travail")
+    add_offer(conn, title="Logisticien CH", company="Co2", external_source="jobup")
+    add_offer(conn, title="Hors fenêtre", company="Co3", external_source="apec")
+    conn.execute("UPDATE offers SET created_at = ? WHERE title != ?", ("2026-04-25 10:00:00", "Hors fenêtre"))
+    conn.execute("UPDATE offers SET created_at = ? WHERE title = ?", ("2026-04-01 10:00:00", "Hors fenêtre"))
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(app, ["brief", "--json", "--today", "2026-04-29"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    by_source = payload["weekly_stats"]["by_source"]
+    assert by_source.get("france-travail") == 1
+    assert by_source.get("jobup") == 1
+    assert "apec" not in by_source  # hors fenêtre de 7 jours
