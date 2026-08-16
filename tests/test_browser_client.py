@@ -73,18 +73,11 @@ def clean_env(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_status_calls_correct_endpoint(browser_server, tmp_path, monkeypatch):
-    # environnement déterministe : accounts.json présent (sinon le fallback
-    # 'emploi' sans config rend le test dépendant de la machine)
-    accounts_dir = tmp_path / "config" / "emploi"
-    accounts_dir.mkdir(parents=True)
-    (accounts_dir / "accounts.json").write_text(
-        json.dumps({"profiles": {"candidature": "emploi-candidature"}, "default": "candidature"})
-    )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-
+def test_status_calls_correct_endpoint(browser_server):
+    # profil explicite : DEFAULT_PROFILE est résolu à l'import du module
+    # (dépendant de la config machine), le test n'en dépend pas
     client = ManagedBrowserClient(base_url=browser_server)
-    result = client.status()
+    result = client.status(profile="emploi-candidature")
     assert result.ok is True
     assert result.payload["profile"] == "emploi-candidature"
     req = FakeBrowserServer.requests[-1]
