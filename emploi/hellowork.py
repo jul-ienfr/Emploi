@@ -552,8 +552,11 @@ def _smart_apply_fill_expression(identity: dict[str, str] | None = None) -> str:
     remplis et ceux restant à renseigner (à faire valider par l'utilisateur).
     """
     identity = identity or {}
+    # le serveur refuse les espaces dans le téléphone ('Certains caractères ne sont pas acceptés')
+    clean_identity = dict(identity)
+    clean_identity["phone"] = "".join(str(clean_identity.get("phone", "")).split())
     identity_json = json.dumps(
-        {k: identity.get(k, "") for k in ("phone", "city", "postal_code", "address")}, ensure_ascii=False
+        {k: clean_identity.get(k, "") for k in ("phone", "city", "postal_code", "address")}, ensure_ascii=False
     )
     return f"""
 (async () => {{
