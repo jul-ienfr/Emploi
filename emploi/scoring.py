@@ -56,25 +56,59 @@ def score_offer(offer: Mapping[str, object]) -> ScoreResult:
             reasons.append(reason)
 
     # Role fit: Python/support/admin roles are a good match for Julien.
-    if _contains(normalized, ("python", "support", "informatique", "helpdesk", "technicien", "admin système", "administrateur système", "linux", "windows")):
+    if _contains(
+        normalized,
+        (
+            "python",
+            "support",
+            "informatique",
+            "helpdesk",
+            "technicien",
+            "admin système",
+            "administrateur système",
+            "linux",
+            "windows",
+        ),
+    ):
         add(18, "support/informatique")
         add(10, "Métier: Python/support/admin compatible avec le profil visé")
 
     # Remote: valuable from Bogève; explicit no-remote/presential is risky.
     remote_negative = _contains(
         f"{remote} {description}",
-        ("pas de télétravail", "sans télétravail", "présentiel obligatoire", "presentiel obligatoire", "100% présentiel", "sur site obligatoire"),
+        (
+            "pas de télétravail",
+            "sans télétravail",
+            "présentiel obligatoire",
+            "presentiel obligatoire",
+            "100% présentiel",
+            "sur site obligatoire",
+        ),
     )
     if remote_negative:
         add(-18, "Remote: présentiel obligatoire ou télétravail absent")
-    elif _contains(f"{remote} {normalized}", ("télétravail", "teletravail", "remote", "à distance", "a distance", "hybride")):
+    elif _contains(
+        f"{remote} {normalized}", ("télétravail", "teletravail", "remote", "à distance", "a distance", "hybride")
+    ):
         add(16, "télétravail")
         add(14, "Remote: télétravail explicite, très adapté depuis Bogève")
 
     # Bogève/location constraints: local/remote is good; car-heavy local travel is risky.
     local_positive = _contains(
         f"{location} {normalized}",
-        ("bogève", "bogeve", "bonneville", "annemasse", "haute-savoie", "genevois", "genève", "geneve", "télétravail", "teletravail", "remote"),
+        (
+            "bogève",
+            "bogeve",
+            "bonneville",
+            "annemasse",
+            "haute-savoie",
+            "genevois",
+            "genève",
+            "geneve",
+            "télétravail",
+            "teletravail",
+            "remote",
+        ),
     )
     transport_risk = _contains(
         normalized,
@@ -104,7 +138,9 @@ def score_offer(offer: Mapping[str, object]) -> ScoreResult:
     if _contains(contract_text, ("cdi", "cdd")):
         add(8, "contrat stable")
         add(6, "Contrat: CDI ou CDD stable")
-    elif _contains(contract_text, ("freelance", "indépendant", "independant", "stage", "alternance", "service civique")):
+    elif _contains(
+        contract_text, ("freelance", "indépendant", "independant", "stage", "alternance", "service civique")
+    ):
         add(-10, "Contrat: freelance/stage/alternance moins prioritaire")
 
     # Salary signal: an indicated salary is useful; lack of signal is a small negative.
@@ -117,23 +153,76 @@ def score_offer(offer: Mapping[str, object]) -> ScoreResult:
     # Realistic match: beginner/training is positive; senior-only requirements are not.
     unrealistic = _contains(
         normalized,
-        ("7 ans", "6 ans", "5 ans", "4 ans", "3 ans", "senior", "expert", "expérience exigée", "experience exigee", "bac+5 obligatoire"),
+        (
+            "7 ans",
+            "6 ans",
+            "5 ans",
+            "4 ans",
+            "3 ans",
+            "senior",
+            "expert",
+            "expérience exigée",
+            "experience exigee",
+            "bac+5 obligatoire",
+        ),
     )
     if unrealistic:
         add(-18, "expérience longue obligatoire")
         add(-16, "Réalisme: exigences trop élevées pour le profil visé")
-    elif _contains(normalized, ("débutant accepté", "debutant accepte", "débutant", "debutant", "junior", "formation assurée", "formation possible")):
+    elif _contains(
+        normalized,
+        (
+            "débutant accepté",
+            "debutant accepte",
+            "débutant",
+            "debutant",
+            "junior",
+            "formation assurée",
+            "formation possible",
+        ),
+    ):
         add(12, "débutant accepté")
         add(10, "Réalisme: profil junior/formation compatible")
 
     # Candidature effort: easy paths are positive; paperwork/friction is negative.
-    if _contains(normalized, ("candidature simple", "postuler simplement", "par email", "cv suffit", "réponse rapide", "reponse rapide", "easy apply")):
+    if _contains(
+        normalized,
+        (
+            "candidature simple",
+            "postuler simplement",
+            "par email",
+            "cv suffit",
+            "réponse rapide",
+            "reponse rapide",
+            "easy apply",
+        ),
+    ):
         add(7, "Candidature: démarche simple")
-    if _contains(normalized, ("lettre manuscrite", "dossier complet", "relances téléphoniques", "relances telephoniques", "portfolio obligatoire", "test technique long")):
+    if _contains(
+        normalized,
+        (
+            "lettre manuscrite",
+            "dossier complet",
+            "relances téléphoniques",
+            "relances telephoniques",
+            "portfolio obligatoire",
+            "test technique long",
+        ),
+    ):
         add(-10, "Candidature: effort élevé ou friction importante")
 
     # Existing negative labels kept for backward-compatible expectations/display.
-    if _contains(normalized, ("déplacements fréquents", "deplacements frequents", "itinérant", "itinerant", "mobilité régionale", "mobilite regionale")):
+    if _contains(
+        normalized,
+        (
+            "déplacements fréquents",
+            "deplacements frequents",
+            "itinérant",
+            "itinerant",
+            "mobilité régionale",
+            "mobilite regionale",
+        ),
+    ):
         add(-10, "déplacements fréquents")
     if _contains(normalized, ("commercial terrain", "prospection terrain")):
         add(-18, "commercial terrain")

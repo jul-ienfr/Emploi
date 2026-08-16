@@ -73,7 +73,16 @@ def clean_env(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_status_calls_correct_endpoint(browser_server):
+def test_status_calls_correct_endpoint(browser_server, tmp_path, monkeypatch):
+    # environnement déterministe : accounts.json présent (sinon le fallback
+    # 'emploi' sans config rend le test dépendant de la machine)
+    accounts_dir = tmp_path / "config" / "emploi"
+    accounts_dir.mkdir(parents=True)
+    (accounts_dir / "accounts.json").write_text(
+        json.dumps({"profiles": {"candidature": "emploi-candidature"}, "default": "candidature"})
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
     client = ManagedBrowserClient(base_url=browser_server)
     result = client.status()
     assert result.ok is True
@@ -184,20 +193,22 @@ def test_unreachable_server_raises_unavailable():
 def test_http_500_raises_command_error(monkeypatch):
     """Server returning a non-200 should raise ManagedBrowserCommandError."""
     with patch("emploi.browser.client.urlopen") as mock_urlopen:
-        mock_urlopen.side_effect = HTTPError(
-            "http://x", 500, "Server Error", {}, b'{"detail":"Internal error"}'
-        )
+        mock_urlopen.side_effect = HTTPError("http://x", 500, "Server Error", {}, b'{"detail":"Internal error"}')
         client = ManagedBrowserClient(base_url="http://x:1")
         with pytest.raises(ManagedBrowserCommandError, match="HTTP 500"):
             client.status()
 
 
 def test_invalid_json_response_raises_command_error(monkeypatch):
-    fake_response = type("FakeResp", (), {
-        "read": lambda self: b"not json",
-        "__enter__": lambda self: self,
-        "__exit__": lambda self, *a: None,
-    })()
+    fake_response = type(
+        "FakeResp",
+        (),
+        {
+            "read": lambda self: b"not json",
+            "__enter__": lambda self: self,
+            "__exit__": lambda self, *a: None,
+        },
+    )()
     with patch("emploi.browser.client.urlopen", return_value=fake_response):
         client = ManagedBrowserClient(base_url="http://x:1")
         with pytest.raises(ManagedBrowserCommandError, match="Invalid JSON"):
@@ -205,11 +216,15 @@ def test_invalid_json_response_raises_command_error(monkeypatch):
 
 
 def test_non_dict_json_response_raises_command_error(monkeypatch):
-    fake_response = type("FakeResp", (), {
-        "read": lambda self: b'"just a string"',
-        "__enter__": lambda self: self,
-        "__exit__": lambda self, *a: None,
-    })()
+    fake_response = type(
+        "FakeResp",
+        (),
+        {
+            "read": lambda self: b'"just a string"',
+            "__enter__": lambda self: self,
+            "__exit__": lambda self, *a: None,
+        },
+    )()
     with patch("emploi.browser.client.urlopen", return_value=fake_response):
         client = ManagedBrowserClient(base_url="http://x:1")
         with pytest.raises(ManagedBrowserCommandError, match="expected object"):

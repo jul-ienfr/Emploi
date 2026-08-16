@@ -77,7 +77,9 @@ def _offer_from_mapping(card: dict[str, Any], fallback_text: str = "") -> Extrac
     url = _absolute_url(_first(card, "url", "href", "browser_url", "link"))
     if html_block:
         link_match = re.search(r"href=[\"']([^\"']*(?:/offres/recherche/detail/|offre/)[^\"']*)[\"']", html_block, re.I)
-        title_match = re.search(r"class=[\"'][^\"']*media-heading-title[^\"']*[\"'][^>]*>(.*?)<", html_block, re.I | re.S)
+        title_match = re.search(
+            r"class=[\"'][^\"']*media-heading-title[^\"']*[\"'][^>]*>(.*?)<", html_block, re.I | re.S
+        )
         company_location_match = re.search(r"<p[^>]*class=[\"']subtext[\"'][^>]*>(.*?)</p>", html_block, re.I | re.S)
         description_match = re.search(r"<p[^>]*class=[\"']description[\"'][^>]*>(.*?)</p>", html_block, re.I | re.S)
         contract_match = re.search(r"<p[^>]*class=[\"']contrat[^\"']*[\"'][^>]*>(.*?)</p>", html_block, re.I | re.S)
@@ -103,7 +105,13 @@ def _offer_from_mapping(card: dict[str, Any], fallback_text: str = "") -> Extrac
             location = parts[1] if len(parts) > 1 else ""
         description = _first(card, "description", "summary", "snippet")
         contract_type = _first(card, "contract_type", "contract", "typeContrat")
-    raw_text = _clean_text(card.get("text") or card.get("description") or card.get("innerText") or fallback_text or json.dumps(card, ensure_ascii=False))
+    raw_text = _clean_text(
+        card.get("text")
+        or card.get("description")
+        or card.get("innerText")
+        or fallback_text
+        or json.dumps(card, ensure_ascii=False)
+    )
     if not title:
         title = _infer_title(raw_text)
     if not title and not url:
@@ -136,7 +144,9 @@ def _iter_card_mappings(payload: Any) -> list[dict[str, Any]]:
         return cards
     html_text = str(payload.get("html", ""))
     if html_text:
-        for match in re.finditer(r"<li\b[^>]*class=[\"'][^\"']*\bresult\b[^\"']*[\"'][^>]*>(.*?)</li>", html_text, re.I | re.S):
+        for match in re.finditer(
+            r"<li\b[^>]*class=[\"'][^\"']*\bresult\b[^\"']*[\"'][^>]*>(.*?)</li>", html_text, re.I | re.S
+        ):
             cards.append({"html": match.group(0), "text": _clean_text(match.group(0))})
     return cards
 
@@ -155,7 +165,9 @@ def _extract_html_articles(html_text: str) -> list[ExtractedOffer]:
         if not link_match:
             continue
         title_match = re.search(r"<h[1-3][^>]*>(.*?)</h[1-3]>", block, re.I | re.S)
-        company_match = re.search(r"class=[\"'][^\"']*(?:company|entreprise)[^\"']*[\"'][^>]*>(.*?)<", block, re.I | re.S)
+        company_match = re.search(
+            r"class=[\"'][^\"']*(?:company|entreprise)[^\"']*[\"'][^>]*>(.*?)<", block, re.I | re.S
+        )
         location_match = re.search(r"class=[\"'][^\"']*(?:location|lieu)[^\"']*[\"'][^>]*>(.*?)<", block, re.I | re.S)
         text = _clean_text(block)
         url = _absolute_url(link_match.group(1))
@@ -175,7 +187,9 @@ def _extract_html_articles(html_text: str) -> list[ExtractedOffer]:
 
 def _extract_links_from_text(text: str) -> list[ExtractedOffer]:
     offers: list[ExtractedOffer] = []
-    for match in re.finditer(r"https?://\S*(?:/offres/recherche/detail/|offre/)\S+|/offres/recherche/detail/[A-Za-z0-9_-]+", text):
+    for match in re.finditer(
+        r"https?://\S*(?:/offres/recherche/detail/|offre/)\S+|/offres/recherche/detail/[A-Za-z0-9_-]+", text
+    ):
         url = _absolute_url(match.group(0).rstrip(".,;)]"))
         start = max(0, match.start() - 160)
         context = _clean_text(text[start : match.end() + 160])

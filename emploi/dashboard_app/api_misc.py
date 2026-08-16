@@ -470,7 +470,7 @@ def api_bookmarks():
     conn = _get_db()
     try:
         rows = conn.execute(
-            "SELECT o.* FROM offers o JOIN offer_bookmarks b ON o.id = b.offer_id " "ORDER BY b.created_at DESC"
+            "SELECT o.* FROM offers o JOIN offer_bookmarks b ON o.id = b.offer_id ORDER BY b.created_at DESC"
         ).fetchall()
         return jsonify([dict(row) for row in rows])
     finally:
@@ -1011,8 +1011,7 @@ def api_save_profile_skills():
             )
         else:
             conn.execute(
-                "INSERT INTO user_profile (skills_json, experience_years, salary_min, salary_max) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO user_profile (skills_json, experience_years, salary_min, salary_max) VALUES (?, ?, ?, ?)",
                 (json.dumps(skills), experience_years, salary_min, salary_max),
             )
         conn.commit()
@@ -1088,7 +1087,7 @@ def api_salary_analysis():
         where_clause = "WHERE " + " AND ".join(where)
 
         rows = conn.execute(
-            f"SELECT salary, location, contract_type, source, external_source " f"FROM offers {where_clause}",
+            f"SELECT salary, location, contract_type, source, external_source FROM offers {where_clause}",
             params,
         ).fetchall()
 
@@ -1220,7 +1219,7 @@ def api_weekly_analytics():
         for i in range(4):
             new_offers.append(
                 conn.execute(
-                    "SELECT COUNT(*) FROM offers " "WHERE created_at >= date('now', ?) AND created_at < date('now', ?)",
+                    "SELECT COUNT(*) FROM offers WHERE created_at >= date('now', ?) AND created_at < date('now', ?)",
                     (f"-{(i + 1) * 7} days", f"-{i * 7} days"),
                 ).fetchone()[0]
             )

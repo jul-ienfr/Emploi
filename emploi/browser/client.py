@@ -279,7 +279,7 @@ class ManagedBrowserClient:
                 error_body = exc.read().decode()[:500]
             except Exception:
                 pass
-            raise ManagedBrowserCommandError(f"Managed Browser HTTP {exc.code}; " f"body={error_body!r}") from exc
+            raise ManagedBrowserCommandError(f"Managed Browser HTTP {exc.code}; body={error_body!r}") from exc
         except URLError as exc:
             raise ManagedBrowserUnavailableError(
                 f"Managed Browser unreachable at {self.base_url}: {exc.reason}. "

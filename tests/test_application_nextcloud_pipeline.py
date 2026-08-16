@@ -15,7 +15,9 @@ def reload_config(monkeypatch, tmp_path):
 
 
 def configure_endpoints(config):
-    config.set_nextcloud_files_endpoint("emploi", base_url="https://nextcloud.test", remote_root="/Emploi", make_default=True)
+    config.set_nextcloud_files_endpoint(
+        "emploi", base_url="https://nextcloud.test", remote_root="/Emploi", make_default=True
+    )
     config.set_kanban_endpoint(
         "chauffeur-pl",
         base_url="https://nextcloud.test",

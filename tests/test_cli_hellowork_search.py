@@ -14,6 +14,7 @@ runner = CliRunner()
 # Fixture: fake HTTP response for HelloWork search
 # ---------------------------------------------------------------------------
 
+
 def _hw_search_html() -> str:
     return """<div data-cy="serpCard" data-analytics-values-param='{"event":"generic_product","event_name":"product.click","product_data":[{"product_id":"80308933","product_variant":"URL_DO_CLASSIQUE_CLIENT","product_list":"LO-Suggest-Detail","product_position":1}]}'>
   <a href="/fr-fr/emplois/80308933.html"
@@ -32,12 +33,14 @@ def _hw_search_html() -> str:
 
 def _mock_urlopen(html: str):
     """Monkeypatch urllib.request.urlopen to return a given HTML response."""
+
     def fake_urlopen(*args, **kwargs):
         return MagicMock(
             read=lambda: html.encode("utf-8"),
             __enter__=lambda s: s,
             __exit__=lambda *a: None,
         )
+
     return fake_urlopen
 
 
@@ -99,6 +102,7 @@ def test_search_profile_add_with_source_hellowork(tmp_path, monkeypatch):
     with connect(db_path) as conn:
         init_db(conn)
         from emploi.db import get_saved_search
+
         saved = get_saved_search(conn, "hw-profile")
         assert saved is not None
         assert saved["source"] == "hellowork"

@@ -63,7 +63,9 @@ def test_boolean_option_helpers_validate_set_get_and_toggle(tmp_path):
 def test_migration_is_idempotent_for_existing_database(tmp_path):
     db_path = tmp_path / "legacy.sqlite"
     raw = sqlite3.connect(db_path)
-    raw.execute("CREATE TABLE offers (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, company TEXT NOT NULL DEFAULT '')")
+    raw.execute(
+        "CREATE TABLE offers (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, company TEXT NOT NULL DEFAULT '')"
+    )
     raw.execute("CREATE TABLE applications (id INTEGER PRIMARY KEY AUTOINCREMENT, offer_id INTEGER NOT NULL)")
     raw.commit()
     raw.close()

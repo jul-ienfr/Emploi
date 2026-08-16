@@ -47,9 +47,15 @@ def nextcloud_files_show(
     json_output: bool = typer.Option(False, "--json", help="Afficher en JSON"),
 ) -> None:
     """Affiche l'endpoint Nextcloud Files/WebDAV configuré."""
-    endpoint = emploi_config.get_nextcloud_files_endpoint(name) if name else emploi_config.get_default_nextcloud_files_endpoint()
+    endpoint = (
+        emploi_config.get_nextcloud_files_endpoint(name)
+        if name
+        else emploi_config.get_default_nextcloud_files_endpoint()
+    )
     if endpoint is None:
-        message = "Aucun endpoint Nextcloud Files configuré" if not name else f"Endpoint Nextcloud Files introuvable: {name}"
+        message = (
+            "Aucun endpoint Nextcloud Files configuré" if not name else f"Endpoint Nextcloud Files introuvable: {name}"
+        )
         if json_output:
             console.print_json(data={"status": "missing", "message": message})
         else:
@@ -78,7 +84,9 @@ def nextcloud_files_list(json_output: bool = typer.Option(False, "--json", help=
         return
     table = Table("Nom", "Défaut", "Racine", "WebDAV")
     for endpoint in endpoints:
-        table.add_row(endpoint["name"], endpoint.get("default", ""), endpoint["remote_root"], endpoint["webdav_root_url"])
+        table.add_row(
+            endpoint["name"], endpoint.get("default", ""), endpoint["remote_root"], endpoint["webdav_root_url"]
+        )
     console.print(table)
 
 
@@ -89,7 +97,9 @@ def nextcloud_tasks_set(
     calendar: str = typer.Option("tasks", "--calendar", help="Nom du calendrier/liste Tasks CalDAV"),
     username_pass: str = typer.Option("", "--username-pass", help="Entrée pass contenant le login"),
     password_pass: str = typer.Option("", "--password-pass", help="Entrée pass contenant le mot de passe/app password"),
-    caldav_base_path: str = typer.Option("/remote.php/dav/calendars", "--caldav-base-path", help="Chemin CalDAV Nextcloud"),
+    caldav_base_path: str = typer.Option(
+        "/remote.php/dav/calendars", "--caldav-base-path", help="Chemin CalDAV Nextcloud"
+    ),
     make_default: bool = typer.Option(False, "--default", help="Définir comme endpoint Tasks par défaut"),
 ) -> None:
     """Enregistre un endpoint Nextcloud Tasks/CalDAV pour les relances emploi."""
@@ -119,9 +129,15 @@ def nextcloud_tasks_show(
     json_output: bool = typer.Option(False, "--json", help="Afficher en JSON"),
 ) -> None:
     """Affiche l'endpoint Nextcloud Tasks/CalDAV configuré."""
-    endpoint = emploi_config.get_nextcloud_tasks_endpoint(name) if name else emploi_config.get_default_nextcloud_tasks_endpoint()
+    endpoint = (
+        emploi_config.get_nextcloud_tasks_endpoint(name)
+        if name
+        else emploi_config.get_default_nextcloud_tasks_endpoint()
+    )
     if endpoint is None:
-        message = "Aucun endpoint Nextcloud Tasks configuré" if not name else f"Endpoint Nextcloud Tasks introuvable: {name}"
+        message = (
+            "Aucun endpoint Nextcloud Tasks configuré" if not name else f"Endpoint Nextcloud Tasks introuvable: {name}"
+        )
         if json_output:
             console.print_json(data={"status": "missing", "message": message})
         else:
@@ -150,5 +166,7 @@ def nextcloud_tasks_list(json_output: bool = typer.Option(False, "--json", help=
         return
     table = Table("Nom", "Défaut", "Calendrier", "CalDAV")
     for endpoint in endpoints:
-        table.add_row(endpoint["name"], endpoint.get("default", ""), endpoint["calendar"], endpoint["calendar_home_url"])
+        table.add_row(
+            endpoint["name"], endpoint.get("default", ""), endpoint["calendar"], endpoint["calendar_home_url"]
+        )
     console.print(table)

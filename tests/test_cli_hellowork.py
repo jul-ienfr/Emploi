@@ -117,7 +117,9 @@ def test_hellowork_apply_dry_run_cli_does_not_submit(monkeypatch, tmp_path):
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     result = CliRunner().invoke(app, ["hellowork", "apply", str(offer_id), "--no-kanban"])
 
@@ -142,7 +144,9 @@ def test_hellowork_apply_dry_run_continues_when_kanban_stack_missing(monkeypatch
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     result = CliRunner().invoke(app, ["hellowork", "apply", str(offer_id)])
 
@@ -159,7 +163,9 @@ def test_hellowork_apply_submit_without_yes_fails_before_browser_or_records(monk
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     def reject_all(request, timeout=30):
         raise AssertionError("Managed Browser ne doit pas être appelé sans --yes")
@@ -181,7 +187,9 @@ def test_hellowork_apply_incomplete_form_returns_clean_error_without_submit(monk
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     global _form_result
     _form_result = _make_form_result(lastnamePresent=False)
@@ -202,7 +210,9 @@ def test_hellowork_apply_unconfirmed_submit_returns_clean_error_without_local_re
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     global _submit_result
     _submit_result = {"submitStatus": 200, "confirmed": False, "textPreview": "Erreur temporaire"}
@@ -232,7 +242,9 @@ def test_hellowork_apply_unconfirmed_submit_does_not_create_deck_card(monkeypatc
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     global _submit_result
     _submit_result = {"submitStatus": 200, "confirmed": False, "textPreview": "Erreur temporaire"}
@@ -251,7 +263,9 @@ def test_hellowork_apply_submit_cli_refuses_already_sent_without_second_post(mon
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
         add_application(conn, offer_id, status="sent", notes="Déjà envoyée")
 
     result = CliRunner().invoke(app, ["hellowork", "apply", str(offer_id), "--submit", "--yes", "--no-kanban"])
@@ -270,7 +284,9 @@ def test_hellowork_apply_submit_succeeds_when_default_kanban_is_missing(monkeypa
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     result = CliRunner().invoke(app, ["hellowork", "apply", str(offer_id), "--submit", "--yes"])
 
@@ -300,7 +316,9 @@ def test_hellowork_apply_submit_cli_records_sent_and_uses_configured_deck_stack(
 
     with connect(db_path) as conn:
         init_db(conn)
-        offer_id = add_offer(conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+        offer_id = add_offer(
+            conn, title="Chauffeur PL", company="Slash", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+        )
 
     global _form_result
     _form_result = _make_form_result(dissuasionRequired=True, dissuasionSkills=["FIMO"])

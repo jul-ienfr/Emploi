@@ -37,18 +37,20 @@ def test_ft_search_imports_offers_via_managed_browser(tmp_path, monkeypatch):
 
     def fake_snapshot(self, *, label=None, site="france-travail", profile="emploi-candidature"):
         calls.append("snapshot")
-        return _ok({
-            "cards": [
-                {
-                    "title": "Technicien support",
-                    "company": "Acme",
-                    "location": "Annecy",
-                    "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
-                    "description": "Support informatique",
-                }
-            ],
-            "text": "Technicien support Acme Annecy",
-        })
+        return _ok(
+            {
+                "cards": [
+                    {
+                        "title": "Technicien support",
+                        "company": "Acme",
+                        "location": "Annecy",
+                        "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+                        "description": "Support informatique",
+                    }
+                ],
+                "text": "Technicien support Acme Annecy",
+            }
+        )
 
     monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.lifecycle_open", fake_lifecycle_open)
     monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
@@ -168,8 +170,8 @@ def test_ft_apply_partner_opens_selected_external_partner(tmp_path, monkeypatch)
 
     # Snapshot text must contain "site de HelloWork" and an HTML <a> href for _detect_partner_handoff
     PARTNER_HTML = (
-        '<div>Candidater maintenant</div>'
-        '<div>site de HelloWork</div>'
+        "<div>Candidater maintenant</div>"
+        "<div>site de HelloWork</div>"
         '<a href="https://www.hellowork.com/fr-fr/emplois/123.html">HelloWork</a>'
     )
 

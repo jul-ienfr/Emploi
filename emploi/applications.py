@@ -27,9 +27,7 @@ def _first_non_empty(*values: object) -> str:
 
 def _is_driver_pl_offer(offer) -> bool:
     haystack = " ".join(
-        str(offer[key] or "")
-        for key in ("title", "description", "notes", "raw_extracted_text")
-        if key in offer.keys()
+        str(offer[key] or "") for key in ("title", "description", "notes", "raw_extracted_text") if key in offer.keys()
     ).lower()
     return any(term in haystack for term in ("poids lourd", "permis c", "chauffeur pl", "conducteur pl"))
 

@@ -32,6 +32,7 @@ def _ensure_unique_external_ids(conn: sqlite3.Connection) -> int:
     ).fetchone()
     if duplicate:
         import warnings
+
         warnings.warn(
             "Cannot create idx_offers_external_source_id: duplicate external offer ids found "
             f"(source={duplicate[0]!r}, external_id={duplicate[1]!r}, count={duplicate[2]}). "
@@ -123,7 +124,7 @@ def migrate(conn: sqlite3.Connection) -> None:
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            """
+            """,
         )
         _add_column_if_missing(conn, "saved_searches", "requested_radius", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(conn, "saved_searches", "notes", "TEXT NOT NULL DEFAULT ''")
@@ -194,7 +195,7 @@ def migrate(conn: sqlite3.Connection) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_applications_status_contact_id
             ON applications (status, last_contact_at, applied_at, id DESC, offer_id);
-            """
+            """,
         )
     except Exception:
         conn.execute("ROLLBACK TO SAVEPOINT migrate_schema")

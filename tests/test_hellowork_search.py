@@ -20,6 +20,7 @@ from emploi.hellowork_search import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class FakeBrowser:
     """Minimal browser stub for HelloWork search tests."""
 
@@ -58,7 +59,9 @@ SINGLE_CARD_HTML = """
 </div>
 """
 
-MULTI_CARD_HTML = SINGLE_CARD_HTML + """
+MULTI_CARD_HTML = (
+    SINGLE_CARD_HTML
+    + """
 <div data-cy="serpCard" data-analytics-values-param='{"event":"generic_product","event_name":"product.click","product_data":[{"product_id":"99990001","product_variant":"URL_DO_CLASSIQUE_CLIENT","product_list":"LO-Suggest-Detail","product_position":2}]}'>
   <a href="/fr-fr/emplois/99990001.html"
      title="Développeur Python H/F - TechCorp"
@@ -73,6 +76,7 @@ MULTI_CARD_HTML = SINGLE_CARD_HTML + """
   <div data-cy="contractCard">CDD</div>
 </div>
 """
+)
 
 HTML_NO_SALARY = """
 <div data-cy="serpCard" data-analytics-values-param='{"event":"generic_product","event_name":"product.click","product_data":[{"product_id":"11111111","product_variant":"URL_DO_CLASSIQUE_CLIENT","product_list":"LO-Suggest-Detail","product_position":1}]}'>
@@ -94,6 +98,7 @@ HTML_NO_SALARY = """
 # ===========================================================================
 # Tests for build_hellowork_search_url
 # ===========================================================================
+
 
 class TestBuildHelloworkSearchUrl:
     def test_query_only(self):
@@ -135,6 +140,7 @@ class TestBuildHelloworkSearchUrl:
 # Tests for extract_hellowork_offers
 # ===========================================================================
 
+
 class TestExtractHelloworkOffers:
     def test_single_card(self):
         offers = extract_hellowork_offers(SINGLE_CARD_HTML)
@@ -174,6 +180,7 @@ class TestExtractHelloworkOffers:
 # ===========================================================================
 # Tests for search_hellowork (with mocked browser)
 # ===========================================================================
+
 
 class TestSearchHellowork:
     def test_search_hellowork_returns_import_results(self, tmp_path, monkeypatch):
@@ -294,6 +301,7 @@ class TestSearchHellowork:
 # Tests for DB migration: source column on saved_searches
 # ===========================================================================
 
+
 class TestSavedSearchSourceColumn:
     def test_migration_adds_source_column(self, tmp_path):
         """Migration must add 'source' column to saved_searches."""
@@ -363,6 +371,7 @@ class TestSavedSearchSourceColumn:
 # Tests for search-profile run dispatch
 # ===========================================================================
 
+
 class TestSearchProfileRunDispatch:
     def test_search_profile_run_dispatches_to_hellowork(self, tmp_path, monkeypatch):
         """search-profile run with source=hellowork dispatches to search_hellowork."""
@@ -391,6 +400,7 @@ class TestSearchProfileRunDispatch:
         monkeypatch.setattr("emploi.cli.search_profile.run_hellowork_saved_search", fake_run_hellowork_saved_search)
 
         from typer.testing import CliRunner
+
         runner = CliRunner()
         result = runner.invoke(
             __import__("emploi.cli", fromlist=["app"]).app,
@@ -426,6 +436,7 @@ class TestSearchProfileRunDispatch:
         monkeypatch.setattr("emploi.cli.search_profile.run_hellowork_saved_search", fake_run_hellowork_saved_search)
 
         from typer.testing import CliRunner
+
         runner = CliRunner()
         result = runner.invoke(
             __import__("emploi.cli", fromlist=["app"]).app,

@@ -81,7 +81,10 @@ def test_next_actions_prioritize_drafts_due_followups_stale_sent_then_new_ft_off
     conn.execute("UPDATE applications SET draft_path = ? WHERE id = ?", ("/tmp/draft.md", draft_app))
     conn.execute("UPDATE applications SET next_action_at = ? WHERE id = ?", ("2026-04-29", due_app))
     conn.execute("UPDATE applications SET next_action_at = ? WHERE id = ?", ("2026-05-01", future_app))
-    conn.execute("UPDATE applications SET applied_at = ?, last_contact_at = ? WHERE id = ?", ("2026-04-10", "2026-04-10", stale_app))
+    conn.execute(
+        "UPDATE applications SET applied_at = ?, last_contact_at = ? WHERE id = ?",
+        ("2026-04-10", "2026-04-10", stale_app),
+    )
     conn.commit()
 
     actions = list_next_actions(conn, today="2026-04-29", stale_after_days=14)

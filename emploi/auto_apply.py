@@ -157,7 +157,9 @@ def run_auto_apply_for_saved_search(
 
     offer = _select_candidate(conn, saved, strategy=strategy, min_score=int(saved["auto_apply_min_score"] or 0))
     if offer is None:
-        return AutoApplyRunResult(saved_search_id, profile_name, mode, strategy, "no_candidate", "Aucune offre éligible")
+        return AutoApplyRunResult(
+            saved_search_id, profile_name, mode, strategy, "no_candidate", "Aucune offre éligible"
+        )
 
     offer_id = int(offer["id"])
     title = str(offer["title"])

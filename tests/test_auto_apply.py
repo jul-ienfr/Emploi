@@ -118,7 +118,9 @@ def test_auto_apply_run_scopes_candidate_to_requested_profile(tmp_path, monkeypa
     monkeypatch.setenv("EMPLOI_DB", str(db_path))
     with connect(db_path) as conn:
         init_db(conn)
-        add_saved_search(conn, name="pl", query='"poids lourd" -SPL', where_text="Bogève 74250", radius=10, contract="CDI")
+        add_saved_search(
+            conn, name="pl", query='"poids lourd" -SPL', where_text="Bogève 74250", radius=10, contract="CDI"
+        )
         add_saved_search(conn, name="dev", query="python remote", where_text="Paris", radius=10, contract="CDI")
         conn.execute(
             """
@@ -163,7 +165,6 @@ def test_auto_apply_run_scopes_candidate_to_requested_profile(tmp_path, monkeypa
         selected = conn.execute("SELECT * FROM applications").fetchall()
         assert len(selected) == 1
         assert selected[0]["offer_id"] == target
-
 
 
 def test_auto_apply_open_mode_creates_draft_but_records_opened_status(tmp_path, monkeypatch):

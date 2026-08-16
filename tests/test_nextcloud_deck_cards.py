@@ -99,7 +99,9 @@ def test_create_offer_card_reuses_existing_event_unless_forced(tmp_path):
     assert first.card_id == 1234
     assert second.card_id == 1234
     assert second.reused_existing is True
-    assert second_client.created == [{"id": 1234, "stack_id": 49, "title": "Chauffeur PL — Dupont", "description": second.description, "order": 999}]
+    assert second_client.created == [
+        {"id": 1234, "stack_id": 49, "title": "Chauffeur PL — Dupont", "description": second.description, "order": 999}
+    ]
     assert forced.reused_existing is False
     assert len(list_offer_events(conn, offer_id)) == 2
 

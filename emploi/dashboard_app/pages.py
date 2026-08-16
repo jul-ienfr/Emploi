@@ -144,10 +144,10 @@ def rss_feed():
         for o in offers:
             url = o["url"] or f"/offer/{o['id']}"
             items += f"""<item>
-                <title>{o['title']}</title>
+                <title>{o["title"]}</title>
                 <link>{url}</link>
-                <description>{(o['description'] or '')[:500]}</description>
-                <pubDate>{o['created_at']}</pubDate>
+                <description>{(o["description"] or "")[:500]}</description>
+                <pubDate>{o["created_at"]}</pubDate>
             </item>\n"""
         from flask import Response
 
@@ -303,7 +303,7 @@ def company_page(name):
     conn = _get_db()
     try:
         offers = conn.execute(
-            "SELECT * FROM offers WHERE company = ? AND is_active = 1 " "ORDER BY score DESC",
+            "SELECT * FROM offers WHERE company = ? AND is_active = 1 ORDER BY score DESC",
             (name,),
         ).fetchall()
         if not offers:

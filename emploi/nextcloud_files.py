@@ -71,7 +71,7 @@ class NextcloudWebDAVClient:
         if remote_root and path.startswith(remote_root):
             path = path[len(remote_root) :]
         path = path.strip("/")
-        return self.root_url if not path else f"{self.root_url}/{urllib.parse.quote(path, safe='/') }"
+        return self.root_url if not path else f"{self.root_url}/{urllib.parse.quote(path, safe='/')}"
 
     @with_retry(  # type: ignore[misc,arg-type]
         max_retries=3,

@@ -17,6 +17,7 @@ from emploi.nextcloud_files import NextcloudExportResult
 _has_nextcloud_pipeline = False
 try:
     from tests.test_application_nextcloud_pipeline import configure_endpoints, reload_config  # noqa: F401
+
     _has_nextcloud_pipeline = True
 except ModuleNotFoundError:
     pass
@@ -89,6 +90,7 @@ def test_auto_followup_schedule_skips_when_disabled_unless_forced(tmp_path, monk
     assert forced.exit_code == 0, forced.stdout
     assert "2026-05-09" in forced.stdout
 
+
 @pytest.mark.skipif(not _has_nextcloud_pipeline, reason="test_application_nextcloud_pipeline module not found")
 def test_pipeline_can_schedule_followup_when_enabled(monkeypatch, tmp_path):
     from tests.test_application_nextcloud_pipeline import configure_endpoints, reload_config
@@ -123,6 +125,7 @@ def test_pipeline_can_schedule_followup_when_enabled(monkeypatch, tmp_path):
     with connect(db_path) as conn:
         assert list_applications(conn) == []
 
+
 @pytest.mark.skipif(not _has_nextcloud_pipeline, reason="test_application_nextcloud_pipeline module not found")
 def test_pipeline_live_followup_does_not_create_sent_application_without_mark_sent(monkeypatch, tmp_path):
     from tests.test_application_nextcloud_pipeline import configure_endpoints, reload_config
@@ -136,7 +139,9 @@ def test_pipeline_live_followup_does_not_create_sent_application_without_mark_se
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
     monkeypatch.setattr(
         "emploi.cli.application.export_application_to_nextcloud",
-        lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
+        lambda *args, **kwargs: NextcloudExportResult(
+            offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False
+        ),
     )
     monkeypatch.setattr(
         "emploi.cli.application.create_offer_card",
@@ -145,7 +150,16 @@ def test_pipeline_live_followup_does_not_create_sent_application_without_mark_se
 
     result = CliRunner().invoke(
         app,
-        ["application", "pipeline", str(offer_id), "--stack", "a-postuler", "--schedule-followup", "--today", "2026-05-06"],
+        [
+            "application",
+            "pipeline",
+            str(offer_id),
+            "--stack",
+            "a-postuler",
+            "--schedule-followup",
+            "--today",
+            "2026-05-06",
+        ],
     )
 
     assert result.exit_code == 0, result.stdout
@@ -168,7 +182,9 @@ def test_pipeline_live_followup_uses_existing_sent_application(monkeypatch, tmp_
         add_application(conn, offer_id, status="sent")
     monkeypatch.setattr(
         "emploi.cli.application.export_application_to_nextcloud",
-        lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
+        lambda *args, **kwargs: NextcloudExportResult(
+            offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False
+        ),
     )
     monkeypatch.setattr(
         "emploi.cli.application.create_offer_card",
@@ -177,7 +193,16 @@ def test_pipeline_live_followup_uses_existing_sent_application(monkeypatch, tmp_
 
     result = CliRunner().invoke(
         app,
-        ["application", "pipeline", str(offer_id), "--stack", "a-postuler", "--schedule-followup", "--today", "2026-05-06"],
+        [
+            "application",
+            "pipeline",
+            str(offer_id),
+            "--stack",
+            "a-postuler",
+            "--schedule-followup",
+            "--today",
+            "2026-05-06",
+        ],
     )
 
     assert result.exit_code == 0, result.stdout
@@ -202,7 +227,9 @@ def test_pipeline_live_followup_marks_sent_only_with_mark_sent(monkeypatch, tmp_
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
     monkeypatch.setattr(
         "emploi.cli.application.export_application_to_nextcloud",
-        lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
+        lambda *args, **kwargs: NextcloudExportResult(
+            offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False
+        ),
     )
     monkeypatch.setattr(
         "emploi.cli.application.create_offer_card",
@@ -246,7 +273,9 @@ def test_pipeline_mark_sent_records_sent_application_without_followup(monkeypatc
         offer_id = add_offer(conn, title="Chauffeur PL", company="Transport Test")
     monkeypatch.setattr(
         "emploi.cli.application.export_application_to_nextcloud",
-        lambda *args, **kwargs: NextcloudExportResult(offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False),
+        lambda *args, **kwargs: NextcloudExportResult(
+            offer_id, "/Emploi/Candidatures/test", ["offre.md"], "https://nextcloud.test/f", False
+        ),
     )
     monkeypatch.setattr(
         "emploi.cli.application.create_offer_card",
@@ -265,7 +294,6 @@ def test_pipeline_mark_sent_records_sent_application_without_followup(monkeypatc
     assert len(applications) == 1
     assert applications[0]["status"] == "sent"
     assert offer["status"] == "sent"
-
 
 
 @pytest.mark.skipif(not _has_nextcloud_pipeline, reason="test_application_nextcloud_pipeline module not found")

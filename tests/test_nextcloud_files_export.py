@@ -23,7 +23,9 @@ class FakeWebDAVClient:
     def upload_text(self, remote_path: str, content: str, content_type: str = "text/plain; charset=utf-8") -> None:
         self.uploaded[remote_path] = content
 
-    def upload_file(self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream") -> None:
+    def upload_file(
+        self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream"
+    ) -> None:
         self.uploaded[remote_path] = Path(local_path).read_bytes()
 
 
@@ -53,7 +55,9 @@ def test_export_application_bundle_uploads_offer_and_draft_and_records_event(tmp
         "webdav_root_url": "https://nextcloud.test/remote.php/dav/files/test-user/Emploi",
     }
 
-    result = export_application_to_nextcloud(conn, offer_id, endpoint=endpoint, client=client, drafts_dir=tmp_path / "drafts")
+    result = export_application_to_nextcloud(
+        conn, offer_id, endpoint=endpoint, client=client, drafts_dir=tmp_path / "drafts"
+    )
 
     assert result.offer_id == offer_id
     assert result.remote_dir == "/Emploi/Candidatures/0001-chauffeur-pl-regional"
@@ -151,7 +155,9 @@ def test_application_export_cli_dry_run_can_include_document_profile(monkeypatch
     letter = tmp_path / "lm.pdf"
     cv.write_bytes(b"CV")
     letter.write_bytes(b"LM")
-    config.set_nextcloud_files_endpoint("emploi", base_url="https://nextcloud.test", remote_root="/Emploi", make_default=True)
+    config.set_nextcloud_files_endpoint(
+        "emploi", base_url="https://nextcloud.test", remote_root="/Emploi", make_default=True
+    )
     config.set_document_profile("poids-lourd", cv_path=str(cv), cover_letter_path=str(letter), make_default=True)
     with connect(db_path) as conn:
         init_db(conn)

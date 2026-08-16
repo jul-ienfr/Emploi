@@ -39,21 +39,21 @@ class FakeBrowser:
 
 
 def test_build_search_url_normalizes_bogeve_and_contract_filter():
-    url = build_search_url('poids lourd', 'Bogève', 10, 'CDI')
+    url = build_search_url("poids lourd", "Bogève", 10, "CDI")
 
-    assert 'lieux=74038' in url
-    assert 'rayon=10' in url
-    assert 'typeContrat=CDI' in url
+    assert "lieux=74038" in url
+    assert "rayon=10" in url
+    assert "typeContrat=CDI" in url
 
 
 def test_build_search_url_keeps_only_positive_keywords_for_france_travail_ui():
-    url = build_search_url('poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;', 'Bogève', 10, 'CDI')
+    url = build_search_url("poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;", "Bogève", 10, "CDI")
 
-    assert '%26amp' not in url
-    assert '%2334' not in url
-    assert '-SPL' not in url
-    assert 'super+poids+lourd' not in url
-    assert 'motsCles=poids+lourd' in url
+    assert "%26amp" not in url
+    assert "%2334" not in url
+    assert "-SPL" not in url
+    assert "super+poids+lourd" not in url
+    assert "motsCles=poids+lourd" in url
 
 
 def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
@@ -76,7 +76,7 @@ def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
 
     results = search_offers(
         conn,
-        query='poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;',
+        query="poids lourd -SPL -&amp;#34;super poids lourd&amp;#34;",
         location="Bogève",
         radius=10,
         contract="CDI",
@@ -84,8 +84,8 @@ def test_search_offers_filters_with_unescaped_saved_query(tmp_path):
     )
 
     assert len(results) == 1
-    assert '%26amp' not in browser.opened[0][0]
-    assert '%2334' not in browser.opened[0][0]
+    assert "%26amp" not in browser.opened[0][0]
+    assert "%2334" not in browser.opened[0][0]
 
 
 def test_search_offers_marks_only_extracted_existing_offers_inactive_when_excluded_by_profile(tmp_path):
@@ -161,27 +161,46 @@ def test_search_offers_marks_only_extracted_existing_offers_inactive_when_exclud
 def test_search_offers_uses_browser_and_upserts_france_travail_offers(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    browser = FakeBrowser([
-        {
-            "url": "https://candidat.francetravail.fr/offres/recherche?motsCles=support",
-            "cards": [
-                {
-                    "title": "Technicien support",
-                    "company": "Acme",
-                    "location": "Annecy",
-                    "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
-                    "description": "Support informatique débutant accepté",
-                }
-            ],
-            "text": "Technicien support Acme Annecy Candidater",
-        }
-    ])
+    browser = FakeBrowser(
+        [
+            {
+                "url": "https://candidat.francetravail.fr/offres/recherche?motsCles=support",
+                "cards": [
+                    {
+                        "title": "Technicien support",
+                        "company": "Acme",
+                        "location": "Annecy",
+                        "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+                        "description": "Support informatique débutant accepté",
+                    }
+                ],
+                "text": "Technicien support Acme Annecy Candidater",
+            }
+        ]
+    )
 
     results = search_offers(conn, query="support", location="Annecy", browser=browser)
-    again = search_offers(conn, query="support", location="Annecy", browser=FakeBrowser([browser.snapshots[0] if browser.snapshots else {
-        "cards": [{"title": "Technicien support", "company": "Acme", "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123"}],
-        "text": "Technicien support Acme",
-    }]))
+    again = search_offers(
+        conn,
+        query="support",
+        location="Annecy",
+        browser=FakeBrowser(
+            [
+                browser.snapshots[0]
+                if browser.snapshots
+                else {
+                    "cards": [
+                        {
+                            "title": "Technicien support",
+                            "company": "Acme",
+                            "url": "https://candidat.francetravail.fr/offres/recherche/detail/ABC123",
+                        }
+                    ],
+                    "text": "Technicien support Acme",
+                }
+            ]
+        ),
+    )
 
     assert len(results) == 1
     assert results[0].created is True
@@ -253,7 +272,9 @@ def test_search_offers_filters_live_dom_by_requested_radius(tmp_path):
         ],
     )
 
-    results = search_offers(conn, query="poids lourd", location="Bogève", radius=20, requested_radius=15, contract="CDI", browser=browser)
+    results = search_offers(
+        conn, query="poids lourd", location="Bogève", radius=20, requested_radius=15, contract="CDI", browser=browser
+    )
 
     assert results == []
     assert "lieux=74038" in browser.opened[0][0]
@@ -340,9 +361,7 @@ def test_refresh_offer_falls_back_to_dom_when_snapshot_is_metadata_only(tmp_path
                 "snapshot": "url: https://candidat.francetravail.fr/offres/recherche/detail/1681160",
             }
         ],
-        console_values=[
-            "Chauffeur Poids Lourd H/F\nDescription complète issue du DOM\nCandidater"
-        ],
+        console_values=["Chauffeur Poids Lourd H/F\nDescription complète issue du DOM\nCandidater"],
     )
 
     refresh_offer(conn, offer_id, browser=browser)
@@ -377,7 +396,9 @@ def test_apply_check_blocks_inactive_or_existing_application_and_detects_signal(
     assert browser.commands[0][0] == "lifecycle_open"
     assert draft_browser.commands[0][0] == "lifecycle_open"
     assert already_browser.commands[0][0] == "lifecycle_open"
-    assert not any(command[0] == "open" for command in browser.commands + draft_browser.commands + already_browser.commands)
+    assert not any(
+        command[0] == "open" for command in browser.commands + draft_browser.commands + already_browser.commands
+    )
     open_browser = FakeBrowser([])
     opened_url = open_offer(conn, active_id, browser=open_browser)
     assert opened_url.endswith("ABC123")
@@ -500,7 +521,9 @@ def test_open_partner_offer_reports_missing_partner_without_opening_external_url
 
     assert "Partenaire introuvable" in message
     assert "disponible(s): Meteojob" in message
-    assert browser.opened == [("https://candidat.francetravail.fr/offres/recherche/detail/ABC123", "france-travail", "emploi-candidature")]
+    assert browser.opened == [
+        ("https://candidat.francetravail.fr/offres/recherche/detail/ABC123", "france-travail", "emploi-candidature")
+    ]
     assert all(command[0] != "open" for command in browser.commands)
     events = list_offer_events(conn, offer_id)
     assert all(event["event_type"] != "partner_opened" for event in events)
@@ -526,7 +549,9 @@ def test_open_partner_offer_reports_missing_partner_url_without_external_open(tm
 
     assert "URL partenaire introuvable" in message
     assert "HelloWork" in message
-    assert browser.opened == [("https://candidat.francetravail.fr/offres/recherche/detail/ABC123", "france-travail", "emploi-candidature")]
+    assert browser.opened == [
+        ("https://candidat.francetravail.fr/offres/recherche/detail/ABC123", "france-travail", "emploi-candidature")
+    ]
     events = list_offer_events(conn, offer_id)
     assert all(event["event_type"] != "partner_opened" for event in events)
 

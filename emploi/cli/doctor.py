@@ -12,7 +12,9 @@ console = Console(soft_wrap=True)
 @app.command()
 def doctor(
     json_output: bool = typer.Option(False, "--json", help="Afficher un diagnostic JSON parseable"),
-    probe_browser: bool = typer.Option(True, "--probe-browser/--no-browser-probe", help="Exécuter le probe Managed Browser"),
+    probe_browser: bool = typer.Option(
+        True, "--probe-browser/--no-browser-probe", help="Exécuter le probe Managed Browser"
+    ),
 ) -> None:
     """Diagnostique l'état local du CLI, de SQLite et du Managed Browser."""
     report = build_doctor_report(probe_browser=probe_browser)

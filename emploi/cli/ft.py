@@ -52,7 +52,11 @@ def ft_smoke(
     }
     if dry_run:
         payload = {**base_payload, "status": "dry-run", "would_run": ["open", "snapshot"]}
-        _print_json_or_text(payload, json_output=json_output, text=f"Dry-run France Travail: ouvrir {search_url}, snapshot; aucun import/candidature.")
+        _print_json_or_text(
+            payload,
+            json_output=json_output,
+            text=f"Dry-run France Travail: ouvrir {search_url}, snapshot; aucun import/candidature.",
+        )
         return
 
     try:
@@ -71,7 +75,11 @@ def ft_smoke(
             "snapshot": {"payload": snapshot.payload},
         },
     }
-    _print_json_or_text(payload, json_output=json_output, text=f"France Travail smoke OK — {len(offers)} offre(s) détectée(s), aucun import/candidature.")
+    _print_json_or_text(
+        payload,
+        json_output=json_output,
+        text=f"France Travail smoke OK — {len(offers)} offre(s) détectée(s), aucun import/candidature.",
+    )
 
 
 @ft_app.command("search")
@@ -133,7 +141,9 @@ def ft_apply(
     check: bool = typer.Option(False, "--check", help="Vérifier seulement la possibilité de candidater"),
     draft: bool = typer.Option(False, "--draft", help="Créer un brouillon local sans soumission"),
     open_browser: bool = typer.Option(False, "--open", help="Ouvrir l'offre dans le Managed Browser"),
-    partner: str | None = typer.Option(None, "--partner", help="Ouvrir le partenaire externe choisi (ex: Meteojob, HelloWork)"),
+    partner: str | None = typer.Option(
+        None, "--partner", help="Ouvrir le partenaire externe choisi (ex: Meteojob, HelloWork)"
+    ),
     drafts_dir: str | None = typer.Option(None, "--drafts-dir", help="Répertoire des brouillons"),
     site: str = typer.Option(DEFAULT_SITE, "--site"),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
@@ -164,7 +174,9 @@ def ft_apply(
                 console.print(f"Offre #{offer_id} ouverte : {url}")
             if partner:
                 partner_result = open_partner_offer(conn, offer_id, partner, site=site, profile=profile)
-                console.print(f"Partenaire {partner_result.partner_name} ouvert pour l'offre #{offer_id} : {partner_result.url}")
+                console.print(
+                    f"Partenaire {partner_result.partner_name} ouvert pour l'offre #{offer_id} : {partner_result.url}"
+                )
     except ManagedBrowserError as error:
         _handle_browser_error(error)
     except ValueError as error:

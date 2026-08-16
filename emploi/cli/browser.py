@@ -89,7 +89,9 @@ def browser_smoke(
             "would_run": ["status", "snapshot"],
             "submit_application": False,
         }
-        _print_json_or_text(payload, json_output=json_output, text="Dry-run Managed Browser: status, snapshot; aucune candidature.")
+        _print_json_or_text(
+            payload, json_output=json_output, text="Dry-run Managed Browser: status, snapshot; aucune candidature."
+        )
         return
 
     try:
@@ -108,4 +110,8 @@ def browser_smoke(
         },
         "submit_application": False,
     }
-    _print_json_or_text(payload, json_output=json_output, text=f"Managed Browser smoke OK — site={site} profile={profile}; aucune candidature.")
+    _print_json_or_text(
+        payload,
+        json_output=json_output,
+        text=f"Managed Browser smoke OK — site={site} profile={profile}; aucune candidature.",
+    )

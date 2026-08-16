@@ -16,7 +16,9 @@ def _ok(payload: dict) -> BrowserCommandResult:
 
 
 def _err(msg: str) -> BrowserCommandResult:
-    return BrowserCommandResult(command="test", site="france-travail", profile="emploi-candidature", payload={"ok": False, "error": msg})
+    return BrowserCommandResult(
+        command="test", site="france-travail", profile="emploi-candidature", payload={"ok": False, "error": msg}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +86,7 @@ def test_browser_snapshot_and_checkpoint_commands(monkeypatch):
 
 def test_browser_unavailable_shows_clear_error_without_traceback(monkeypatch):
     """Client error is shown cleanly, no traceback."""
+
     def fake_status(self, **kw):
         raise ManagedBrowserUnavailableError("Server not running")
 
@@ -107,6 +110,7 @@ def test_browser_status_invalid_timeout_shows_clear_error_without_traceback(monk
 
 def test_browser_status_subprocess_timeout_shows_clear_error_without_traceback(monkeypatch):
     """HTTP timeout shows 'timed out' error cleanly."""
+
     def fake_status(self, **kw):
         raise ManagedBrowserUnavailableError("HTTP request timed out after 3s")
 
@@ -147,6 +151,7 @@ def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
 
 def test_browser_smoke_dry_run_json_does_not_call_managed_browser(monkeypatch):
     """smoke --dry-run --json never touches the client."""
+
     def fake_status(self, **kw):
         raise AssertionError("should not be called")
 

@@ -49,10 +49,7 @@ def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 def _index_names(conn: sqlite3.Connection) -> set[str]:
-    return {
-        row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
-    }
+    return {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
 
 
 def _create_legacy_schema(conn: sqlite3.Connection) -> None:
