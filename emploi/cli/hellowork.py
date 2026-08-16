@@ -32,6 +32,9 @@ def hellowork_apply(
     ack_dissuasion: bool = typer.Option(
         False, "--ack-dissuasion", help="Confirme l'envoi malgré un avertissement compétences HelloWork"
     ),
+    ack_cgu: bool = typer.Option(
+        False, "--ack-cgu", help="Confirme explicitement avoir accepté les CGU HelloWork (case HasAcceptedCGU)"
+    ),
     kanban_stack: str = typer.Option("", "--kanban-stack", help="Alias/ID stack Deck candidature envoyée"),
     kanban_endpoint: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
     cv: str = typer.Option(
@@ -69,6 +72,7 @@ def hellowork_apply(
                 kanban_stack=kanban_stack,
                 kanban_endpoint=kanban_endpoint,
                 ack_dissuasion=ack_dissuasion,
+                ack_cgu=ack_cgu,
                 identity=identity,
                 cv_path=cv_path or None,
             )

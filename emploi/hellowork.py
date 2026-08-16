@@ -312,12 +312,19 @@ def _inspect_expression(
 """
 
 
-def _submit_expression(offer_external_id: str, motivation: str, *, identity: dict[str, str] | None = None) -> str:
+def _submit_expression(
+    offer_external_id: str,
+    motivation: str,
+    *,
+    identity: dict[str, str] | None = None,
+    ack_cgu: bool = False,
+) -> str:
     identity = identity or {}
     return f"""
 (async () => {{
   const motivation = {_js_string(motivation)};
   const identity = {json.dumps({k: identity.get(k, "") for k in ("firstname", "lastname", "email")}, ensure_ascii=False)};
+  const ackCgu = {json.dumps(bool(ack_cgu))};
   const out = {{urlBefore: location.href}};
   let form = document.querySelector('#offer-detail-main-step-form');
   if (!form) {{
@@ -341,6 +348,10 @@ def _submit_expression(offer_external_id: str, motivation: str, *, identity: dic
   setField('LastName', identity.lastname);
   setField('Email', identity.email);
   let responseText = '';
+  if (ackCgu) {{
+    const cgu = form.querySelector('[name="HasAcceptedCGU"]');
+    if (cgu && !cgu.checked) cgu.checked = true;
+  }}
   const submitResponse = await fetch(form.action || '/fr-fr/offres/postcandidateinformationfromstepframeview', {{
     method: 'POST', credentials: 'include', body: new FormData(form),
     headers: {{'Turbo-Frame': 'funnel-frame'}}
@@ -528,6 +539,7 @@ def apply_hellowork(
     ack_dissuasion: bool = False,
     identity: dict[str, str] | None = None,
     cv_path: str | Path | None = None,
+    ack_cgu: bool = False,
 ) -> HelloWorkApplyResult:
     if submit:
         _ensure_not_already_submitted(conn, offer_id)
@@ -561,10 +573,10 @@ def apply_hellowork(
     if submit and form.dissuasion_required and not ack_dissuasion:
         skills = ", ".join(form.dissuasion_skills) or "non précisées"
         raise ValueError(f"Dissuasion HelloWork détectée ({skills}); ajoute --ack-dissuasion pour confirmer l'envoi")
-    if submit and not form.cgu_consent_ok:
+    if submit and not form.cgu_consent_ok and not ack_cgu:
         raise ValueError(
             "Consentement CGU HelloWork requis mais non coché (champ HasAcceptedCGU); "
-            "le CLI ne coche jamais ce champ à ta place — coche-le dans le navigateur puis relance"
+            "ajoute --ack-cgu pour confirmer explicitement avoir accepté les CGU HelloWork"
         )
     if not submit:
         add_offer_event(
@@ -622,7 +634,9 @@ def apply_hellowork(
     final_motivation = motivation if motivation else _read_draft_message(offer_id, drafts_dir=drafts_dir)
     data = _json_from_browser_result(
         browser.console_eval(
-            _submit_expression(form.offer_external_id, final_motivation, identity=identity), site=site, profile=profile
+            _submit_expression(form.offer_external_id, final_motivation, identity=identity, ack_cgu=ack_cgu),
+            site=site,
+            profile=profile,
         )
     )
     if not data.get("confirmed"):

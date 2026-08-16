@@ -386,7 +386,7 @@ def test_apply_hellowork_submit_refuses_unchecked_cgu_consent(tmp_path):
         )
 
     assert "HasAcceptedCGU" in str(excinfo.value)
-    assert "jamais ce champ" in str(excinfo.value)
+    assert "--ack-cgu" in str(excinfo.value)
     # aucune expression de soumission ne doit avoir été envoyée au navigateur
     assert not any("postcandidateinformationfromstepframeview" in expr for expr in browser.expressions)
     assert list_applications(conn) == []
@@ -414,3 +414,30 @@ def test_apply_hellowork_dry_run_allowed_with_unchecked_cgu_consent(tmp_path):
     payload = json.loads(events[0]["payload_json"])
     assert payload["cgu_consent_required"] is True
     assert payload["cgu_consent_checked"] is False
+
+
+def test_apply_hellowork_submit_allowed_with_ack_cgu(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(cgu_consent_required=True, cgu_consent_checked=False)
+
+    result = apply_hellowork(
+        conn,
+        offer_id,
+        browser=browser,
+        submit=True,
+        site="france-travail",
+        profile="emploi-candidature",
+        kanban=False,
+        ack_cgu=True,
+    )
+
+    assert result.submitted is True
+    # l'expression de soumission doit cocher la case CGU (consentement explicite)
+    submit_expr = [e for e in browser.expressions if "postcandidateinformationfromstepframeview" in e]
+    assert submit_expr
+    assert "ackCgu = true" in submit_expr[0]
+    assert "HasAcceptedCGU" in submit_expr[0]
