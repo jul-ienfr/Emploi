@@ -217,7 +217,12 @@ def _inspect_expression(
   let doc = parser.parseFromString(initialHtml, 'text/html');
   let form = doc.querySelector('#offer-detail-main-step-form') || doc.querySelector('form');
   if (form) {{
-    const target = document.querySelector('#funnel-frame') || document.body;
+    let target = document.querySelector('#funnel-frame');
+    if (!target) {{
+      target = document.createElement('turbo-frame');
+      target.id = 'funnel-frame';
+      document.body.appendChild(target);
+    }}
     target.innerHTML = initialHtml;
     form = document.querySelector('#offer-detail-main-step-form') || document.querySelector('form');
   }}
@@ -331,7 +336,12 @@ def _submit_expression(
     const initialUrl = `/fr-fr/offres/getinitialformframeview?offerId=${{encodeURIComponent({_js_string(offer_external_id)})}}&ts=${{Date.now()}}`;
     const initialResponse = await fetch(initialUrl, {{credentials: 'include', headers: {{'Turbo-Frame': 'funnel-frame'}}}});
     const initialHtml = await initialResponse.text();
-    const target = document.querySelector('#funnel-frame') || document.body;
+    let target = document.querySelector('#funnel-frame');
+    if (!target) {{
+      target = document.createElement('turbo-frame');
+      target.id = 'funnel-frame';
+      document.body.appendChild(target);
+    }}
     target.innerHTML = initialHtml;
     form = document.querySelector('#offer-detail-main-step-form');
   }}
@@ -358,7 +368,12 @@ def _submit_expression(
   }});
   out.submitStatus = submitResponse.status;
   responseText = await submitResponse.text();
-  const target = document.querySelector('#funnel-frame') || document.body;
+  let target = document.querySelector('#funnel-frame');
+  if (!target) {{
+    target = document.createElement('turbo-frame');
+    target.id = 'funnel-frame';
+    document.body.appendChild(target);
+  }}
   target.innerHTML = responseText;
   await new Promise(r => setTimeout(r, 800));
   const text = document.body.innerText || '';
@@ -434,7 +449,12 @@ def _smart_apply_expression() -> str:
     if (live) { live.innerHTML = respFrame.innerHTML; target = live; }
   }
   if (!target) {
-    target = document.querySelector('#funnel-frame') || document.body;
+    target = document.querySelector('#funnel-frame');
+    if (!target) {
+      target = document.createElement('turbo-frame');
+      target.id = 'funnel-frame';
+      document.body.appendChild(target);
+    }
     target.innerHTML = responseText;
   }
   // laisse le contrôleur mutable (question du recruteur) se charger
@@ -479,7 +499,12 @@ def _otp_expression(offer_external_id: str, otp_code: str) -> str:
   }});
   out.submitStatus = submitResponse.status;
   const responseText = await submitResponse.text();
-  const target = document.querySelector('#funnel-frame') || document.body;
+  let target = document.querySelector('#funnel-frame');
+  if (!target) {{
+    target = document.createElement('turbo-frame');
+    target.id = 'funnel-frame';
+    document.body.appendChild(target);
+  }}
   target.innerHTML = responseText;
   await new Promise(r => setTimeout(r, 800));
   const text = document.body.innerText || '';
