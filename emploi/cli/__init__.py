@@ -44,6 +44,8 @@ kanban_app = typer.Typer(help="Endpoint kanban externe pour le suivi recherche e
 kanban_card_app = typer.Typer(help="Cartes Deck liées aux offres")
 nextcloud_files_app = typer.Typer(help="Endpoint Nextcloud Files/WebDAV pour les documents emploi")
 nextcloud_tasks_app = typer.Typer(help="Endpoint Nextcloud Tasks/CalDAV pour les relances emploi")
+contacts_app = typer.Typer(help="Endpoint Nextcloud Contacts/CardDAV pour les recruteurs")
+journal_app = typer.Typer(help="Journal candidature Nextcloud (entrées datées)")
 app.add_typer(offer_app, name="offer")
 app.add_typer(application_app, name="application")
 app.add_typer(browser_app, name="browser")
@@ -58,6 +60,8 @@ kanban_app.add_typer(kanban_card_app, name="card")
 app.add_typer(kanban_app, name="kanban")
 app.add_typer(nextcloud_files_app, name="nextcloud-files")
 app.add_typer(nextcloud_tasks_app, name="nextcloud-tasks")
+app.add_typer(contacts_app, name="contact")
+app.add_typer(journal_app, name="journal")
 console = Console(soft_wrap=True)
 
 
@@ -320,6 +324,7 @@ def init() -> None:
 import emploi.cli.application  # noqa: E402, F401
 import emploi.cli.auto_apply  # noqa: E402, F401
 import emploi.cli.browser  # noqa: E402, F401
+import emploi.cli.contacts  # noqa: E402, F401
 import emploi.cli.dashboard  # noqa: E402, F401
 import emploi.cli.doctor  # noqa: E402, F401
 import emploi.cli.document_profile  # noqa: E402, F401

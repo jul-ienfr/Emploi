@@ -43,6 +43,10 @@ def _nextcloud_tasks_endpoints_file() -> Path:
     return _emploi_config_dir() / "nextcloud_tasks.json"
 
 
+def _nextcloud_contacts_endpoints_file() -> Path:
+    return _emploi_config_dir() / "nextcloud_contacts.json"
+
+
 # ── accounts (profiles) ───────────────────────────────────────────────
 
 
@@ -511,3 +515,88 @@ def set_nextcloud_tasks_endpoint(
     default = normalized_name if make_default or not data.get("default") else str(data.get("default", "") or "")
     _write_json(_nextcloud_tasks_endpoints_file(), {"default": default, "endpoints": endpoints})
     return _normalize_nextcloud_tasks_endpoint(normalized_name, endpoint, default_name=default)
+
+
+# ── Nextcloud Contacts (CardDAV) ──────────────────────────────────────
+
+
+def _empty_nextcloud_contacts_endpoints_payload() -> dict[str, Any]:
+    return {"default": "", "endpoints": {}}
+
+
+def _load_nextcloud_contacts_endpoints_payload() -> dict[str, Any]:
+    data = _load_json(_nextcloud_contacts_endpoints_file()) or _empty_nextcloud_contacts_endpoints_payload()
+    endpoints = data.get("endpoints", {})
+    if not isinstance(endpoints, dict):
+        endpoints = {}
+    default = str(data.get("default", "") or "")
+    return {"default": default, "endpoints": endpoints}
+
+
+def _normalize_nextcloud_contacts_endpoint(name: str, raw: dict[str, Any], *, default_name: str = "") -> dict[str, Any]:
+    base_url = str(raw.get("base_url", "") or "").rstrip("/")
+    addressbook = str(raw.get("addressbook", "") or "contacts").strip("/") or "contacts"
+    carddav_base_path = str(
+        raw.get("carddav_base_path", "/remote.php/dav/addressbooks") or "/remote.php/dav/addressbooks"
+    )
+    if not carddav_base_path.startswith("/"):
+        carddav_base_path = "/" + carddav_base_path
+    addressbook_home_url = f"{base_url}{carddav_base_path}/{{username}}/{addressbook}" if base_url else ""
+    return {
+        "name": name,
+        "base_url": base_url,
+        "addressbook": addressbook,
+        "carddav_base_path": carddav_base_path,
+        "addressbook_home_url": addressbook_home_url,
+        "username_pass": str(raw.get("username_pass", "") or ""),
+        "password_pass": str(raw.get("password_pass", "") or ""),
+        "default": "✓" if name == default_name else "",
+    }
+
+
+_nextcloud_contacts_registry = EndpointRegistry(
+    _nextcloud_contacts_endpoints_file,
+    _normalize_nextcloud_contacts_endpoint,  # type: ignore[arg-type]
+)  # type: ignore[arg-type]
+
+
+def list_nextcloud_contacts_endpoints() -> list[dict[str, Any]]:
+    return _nextcloud_contacts_registry.list()
+
+
+def get_nextcloud_contacts_endpoint(name: str) -> dict[str, Any] | None:
+    return _nextcloud_contacts_registry.get(name)
+
+
+def get_default_nextcloud_contacts_endpoint() -> dict[str, Any] | None:
+    return _nextcloud_contacts_registry.get_default()
+
+
+def set_nextcloud_contacts_endpoint(
+    name: str,
+    *,
+    base_url: str,
+    addressbook: str = "contacts",
+    username_pass: str = "",
+    password_pass: str = "",
+    carddav_base_path: str = "/remote.php/dav/addressbooks",
+    make_default: bool = False,
+) -> dict[str, Any]:
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Nom d'endpoint Nextcloud Contacts obligatoire")
+    if not base_url.strip():
+        raise ValueError("URL Nextcloud obligatoire")
+    endpoint = {
+        "base_url": base_url.strip().rstrip("/"),
+        "addressbook": addressbook.strip().strip("/") or "contacts",
+        "carddav_base_path": carddav_base_path,
+        "username_pass": username_pass.strip(),
+        "password_pass": password_pass.strip(),
+    }
+    data = _load_nextcloud_contacts_endpoints_payload()
+    endpoints = dict(data.get("endpoints", {}))
+    endpoints[normalized_name] = endpoint
+    default = normalized_name if make_default or not data.get("default") else str(data.get("default", "") or "")
+    _write_json(_nextcloud_contacts_endpoints_file(), {"default": default, "endpoints": endpoints})
+    return _normalize_nextcloud_contacts_endpoint(normalized_name, endpoint, default_name=default)

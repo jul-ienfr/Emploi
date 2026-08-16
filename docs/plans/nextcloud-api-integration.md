@@ -1,6 +1,6 @@
 # Plan — intégration Nextcloud API pour le CLI Emploi
 
-> **Statut global : Phases 1-3 implémentées (2026-08-16), Phase 4 à faire quand le pipeline est stable.**
+> **Statut global : Phases 1-4 implémentées (2026-08-16). Reste optionnel : recherche Nextcloud (indexation).**
 
 Objectif : utiliser Nextcloud comme hub local de recherche d'emploi sans MCP, via APIs déterministes et testables.
 
@@ -88,9 +88,11 @@ Stockage : références locales + UID CalDAV pour idempotence. ✅
 
 À faire seulement quand le pipeline Deck+Files+Calendar est stable.
 
-- Contacts recruteurs/entreprises via CardDAV.
-- Notes Markdown dans `/Emploi/Journal.md` et `/Emploi/Entretiens/`.
-- Recherche Nextcloud plus tard si indexation utile.
+> **Statut : FAIT (2026-08-16)** — `emploi contact set/show/list/browse/add` (CardDAV, carnet `contacts` par défaut, VCARD 3.0, UID slugifié, `--dry-run`) et `emploi journal add TEXT` (entrée datée en tête de `/Emploi/Journal.md`, GET+PUT via le client Files, `--dry-run`). Tests avec faux clients (`tests/test_contacts_and_journal.py`).
+
+- Contacts recruteurs/entreprises via CardDAV. ✅
+- Notes Markdown dans `/Emploi/Journal.md` et `/Emploi/Entretiens/`. ✅ (Journal.md ; Entretiens/ à étendre si besoin)
+- Recherche Nextcloud plus tard si indexation utile. ⏳ (non fait, optionnel)
 
 ## Priorité recommandée
 

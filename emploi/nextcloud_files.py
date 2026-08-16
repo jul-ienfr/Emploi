@@ -6,6 +6,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -30,6 +31,8 @@ class WebDAVClientProtocol(Protocol):
     def ensure_dir(self, remote_path: str) -> None: ...
 
     def upload_text(self, remote_path: str, content: str, content_type: str = "text/plain; charset=utf-8") -> None: ...
+
+    def read_text(self, remote_path: str) -> str | None: ...
 
     def upload_file(
         self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream"
@@ -99,6 +102,24 @@ class NextcloudWebDAVClient:
 
     def upload_text(self, remote_path: str, content: str, content_type: str = "text/plain; charset=utf-8") -> None:
         self._request("PUT", remote_path, data=content.encode("utf-8"), content_type=content_type)  # type: ignore[misc]
+
+    def read_text(self, remote_path: str) -> str | None:
+        """Read a remote file's content (None if it does not exist)."""
+        url = self._url_for(remote_path)
+        request = urllib.request.Request(url, method="GET")
+        token = f"{self.username}:{self.password}".encode()
+        import base64
+
+        request.add_header("Authorization", "Basic " + base64.b64encode(token).decode())
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return None
+            if error.code in (429, 500, 502, 503, 504):
+                raise ConnectionError(f"Nextcloud WebDAV HTTP {error.code}") from error
+            raise
 
     def upload_file(
         self, remote_path: str, local_path: str | Path, content_type: str = "application/octet-stream"
@@ -223,3 +244,41 @@ def export_application_to_nextcloud(
         ),
     )
     return result
+
+
+@dataclass(frozen=True)
+class JournalEntryResult:
+    remote_path: str
+    entry: str
+    entry_count: int
+    dry_run: bool = False
+
+
+def append_journal_note(
+    endpoint: dict[str, object],
+    *,
+    content: str,
+    remote_path: str = "/Emploi/Journal.md",
+    client: WebDAVClientProtocol | None = None,
+    dry_run: bool = False,
+) -> JournalEntryResult:
+    """Append a dated markdown entry to a remote journal file (GET + PUT).
+
+    Idempotent enough for an operator journal: appends at the top of the file
+    (latest first) and returns the entry text. ``--dry-run`` previews without
+    any network write.
+    """
+    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+    entry = f"## {stamp}\n\n{str(content).strip()}\n"
+    existing = None
+    if not dry_run:
+        real_client = client or NextcloudWebDAVClient(endpoint)
+        existing = real_client.read_text(remote_path)
+    previous_entries = 0
+    if existing:
+        previous_entries = existing.count("\n## ") + (1 if existing.startswith("## ") else 0)
+    new_content = f"{entry}\n---\n\n{existing}" if existing else entry
+    if not dry_run:
+        real_client = client or NextcloudWebDAVClient(endpoint)
+        real_client.upload_text(remote_path, new_content)
+    return JournalEntryResult(remote_path=remote_path, entry=entry, entry_count=previous_entries + 1, dry_run=dry_run)
