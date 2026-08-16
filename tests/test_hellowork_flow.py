@@ -35,6 +35,7 @@ class FakeBrowser:
         smart_apply_confirm_after: int = 1,
         smart_apply_question: bool = False,
         fill_remaining: list[str] | None = None,
+        dissuasion_confirm: bool = True,
         main_submit_step: str = "otp",
         result_key: str = "result",
     ) -> None:
@@ -49,6 +50,7 @@ class FakeBrowser:
         self.smart_apply_attempts = 0
         self.smart_apply_question = smart_apply_question
         self.fill_remaining = fill_remaining if fill_remaining is not None else []
+        self.dissuasion_confirm = dissuasion_confirm
         self.main_submit_step = main_submit_step
         self.result_key = result_key
 
@@ -58,6 +60,17 @@ class FakeBrowser:
 
     def console_eval(self, expression: str, *, site: str, profile: str):
         self.expressions.append(expression)
+        if "Formulaire de dissuasion HelloWork introuvable" in expression:
+            return FakeBrowserResult(
+                {
+                    "submitStatus": 200,
+                    "confirmed": self.dissuasion_confirm,
+                    "textPreview": "Votre candidature est envoyée, vous allez être redirigé·e"
+                    if self.dissuasion_confirm
+                    else "Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé à j@mail.fr",
+                },
+                key=self.result_key,
+            )
         if "SMART_APPLY_FILL" in expression:
             return FakeBrowserResult(
                 {"filled": [], "remaining": list(self.fill_remaining)},
@@ -99,7 +112,11 @@ class FakeBrowser:
                     else (
                         "Temporis Interim a besoin d'une information complémentaire pour enregistrer votre candidature"
                         if self.main_submit_step == "smart-apply"
-                        else "Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé à j@mail.fr"
+                        else (
+                            "Ce job demande des compétences précises : FIMO FCO"
+                            if self.main_submit_step == "dissuasion"
+                            else "Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé à j@mail.fr"
+                        )
                     ),
                 },
                 key=self.result_key,
@@ -671,3 +688,66 @@ def test_apply_hellowork_submit_smart_apply_missing_identity_reports(tmp_path):
     assert "téléphone" in str(excinfo.value)
     assert "identity set --phone" in str(excinfo.value)
     assert list_applications(conn) == []
+
+
+def test_is_dissuasion_step_detection():
+    from emploi.hellowork import _is_dissuasion_step
+
+    assert _is_dissuasion_step("Ce job demande des compétences précises : FIMO FCO")
+    assert _is_dissuasion_step("Envoyer ma candidature")
+    assert not _is_dissuasion_step("Est-ce bien votre email ?")
+
+
+def test_apply_hellowork_submit_dissuasion_requires_ack(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(
+        confirm=False,
+        main_submit_step="dissuasion",
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+
+    assert "--ack-dissuasion" in str(excinfo.value)
+    assert list_applications(conn) == []
+
+
+def test_apply_hellowork_submit_dissuasion_ack_finalizes(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(
+        confirm=False,
+        main_submit_step="dissuasion",
+        dissuasion_confirm=True,
+    )
+
+    result = apply_hellowork(
+        conn,
+        offer_id,
+        browser=browser,
+        submit=True,
+        site="france-travail",
+        profile="emploi-candidature",
+        kanban=False,
+        ack_dissuasion=True,
+    )
+
+    assert result.submitted is True
+    apps = list_applications(conn)
+    assert len(apps) == 1
+    assert apps[0]["status"] == "sent"

@@ -309,7 +309,7 @@ def _inspect_expression(
     }}
   }}
   out.cvTextPreview = cvText.slice(0, 240);
-  out.dissuasionRequired = /postcertificationdissuasionformstepframeview|compétences? (?:absentes?|manquantes?)/i.test(initialHtml + ' ' + document.body.innerText);
+  out.dissuasionRequired = /postcertificationdissuasionformstepframeview|compétences? (?:absentes?|manquantes?|pr[ée]cises)/i.test(initialHtml + ' ' + document.body.innerText);
   const skills = Array.from((initialHtml + ' ' + document.body.innerText).matchAll(/(?:FIMO|FCO|Carte de conducteur)/gi)).map(m => m[0]);
   out.dissuasionSkills = Array.from(new Set(skills.map(s => s.toUpperCase())));
   return JSON.stringify(out);
@@ -405,6 +405,56 @@ def _load_cv_base64(cv_path: str | Path | None) -> tuple[str, str]:
     import base64
 
     return base64.b64encode(path.read_bytes()).decode("ascii"), path.name
+
+
+def _is_dissuasion_step(preview: str) -> bool:
+    """True si la réponse affiche l'avertissement compétences (dissuasion)."""
+    text = str(preview or "").casefold()
+    return bool(
+        re.search(
+            r"comp[ée]tences pr[ée]cises|assurez-vous d'[êe]tre [àa] l'aise|postcertificationdissuasionformstepframeview|envoyer ma candidature",
+            text,
+        )
+    )
+
+
+def _dissuasion_expression() -> str:
+    """Passe l'étape de dissuasion compétences (postcertificationdissuasionformstepframeview)."""
+    return r"""
+(async () => {
+  const out = {urlBefore: location.href};
+  const form = Array.from(document.querySelectorAll('form')).find(f => /dissuasion/i.test(f.getAttribute('action') || ''));
+  if (!form) {
+    const btn = Array.from(document.querySelectorAll('button')).find(b => /envoyer ma candidature/i.test(b.innerText || b.value || ''));
+    if (!btn) throw new Error('Formulaire de dissuasion HelloWork introuvable');
+    btn.click();
+    out.nativeSubmit = true;
+  } else {
+    out.nativeSubmit = false;
+    const submitResponse = await fetch(form.getAttribute('action'), {
+      method: 'POST', credentials: 'include', body: new FormData(form),
+      headers: {'Turbo-Frame': 'funnel-frame', 'X-Requested-With': 'XMLHttpRequest'}
+    });
+    out.submitStatus = submitResponse.status;
+    const responseText = await submitResponse.text();
+    let target = document.querySelector('#funnel-frame');
+    if (!target) {
+      target = document.createElement('turbo-frame');
+      target.id = 'funnel-frame';
+      document.body.appendChild(target);
+    }
+    target.innerHTML = responseText;
+  }
+  await new Promise(r => setTimeout(r, 3000));
+  const text = document.body ? document.body.innerText.replace(/\s+/g, ' ') : '';
+  out.urlAfter = location.href;
+  out.confirmed = /candidature\s+est\s+envoy|candidature\s+envoy/i.test(text);
+  out.textPreview = text.slice(0, 500);
+  const funnelEl = document.querySelector('#funnel-frame');
+  out.frameText = (funnelEl ? funnelEl.innerText || '' : '').replace(/\s+/g, ' ').slice(0, 800);
+  return JSON.stringify(out);
+})()
+"""
 
 
 def _is_otp_step(preview: str) -> bool:
@@ -851,6 +901,19 @@ def apply_hellowork(
             if not otp_data.get("confirmed"):
                 raise ValueError("Code de vérification HelloWork refusé ou confirmation non détectée après validation")
             data = otp_data
+            preview = str(data.get("textPreview") or "") + " " + str(data.get("frameText") or "")
+        if not data.get("confirmed") and _is_dissuasion_step(preview):
+            # Avertissement compétences (dissuasion) renvoyé après le POST principal
+            if not ack_dissuasion:
+                raise ValueError(
+                    "Dissuasion HelloWork détectée (compétences demandées par le recruteur); "
+                    "ajoute --ack-dissuasion pour confirmer l'envoi"
+                )
+            dissuasion_data = _json_from_browser_result(
+                browser.console_eval(_dissuasion_expression(), site=site, profile=profile)
+            )
+            data = dissuasion_data
+            preview = str(data.get("textPreview") or "") + " " + str(data.get("frameText") or "")
         if not data.get("confirmed") and _is_smart_apply_step(preview):
             # Étape 'information complémentaire' (Smart Apply SAv2) : le recruteur
             # demande une info. On soumet l'étape (swap Turbo pour laisser le
