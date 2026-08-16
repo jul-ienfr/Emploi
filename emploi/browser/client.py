@@ -4,6 +4,8 @@ import json
 import logging
 import math
 import os
+import random
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -17,6 +19,23 @@ logger = logging.getLogger(__name__)
 # Per-operation timeout overrides (seconds).
 _TIMEOUT_STATUS = 10.0
 _TIMEOUT_OPEN = 120.0
+
+# Number of times to honor the server's explicit "retry": true signal.
+_RETRY_ON_SERVER_SIGNAL = 2
+
+
+def _is_retryable_response(exc: ManagedBrowserCommandError) -> bool:
+    """True if the server explicitly asked to retry (``retry: true``)."""
+    if not exc.args:
+        return False
+    message = str(exc.args[0])
+    try:
+        # "Managed Browser HTTP 500; body='{...}'" → parse the JSON body.
+        body = message.split("body=", 1)[1].strip("'\"")
+        payload = json.loads(body)
+    except (IndexError, json.JSONDecodeError, ValueError):
+        return False
+    return bool(payload.get("retry")) or bool(payload.get("retryable"))
 
 
 class ManagedBrowserClient:
@@ -32,6 +51,7 @@ class ManagedBrowserClient:
     ) -> None:
         self.base_url = (base_url or os.environ.get("EMPLOI_MANAGED_BROWSER_URL", "http://127.0.0.1:9377")).rstrip("/")  # type: ignore[union-attr]
         self.timeout = self._parse_timeout(timeout)
+        self._retry_on_server = int(os.environ.get("EMPLOI_MANAGED_BROWSER_RETRY_SERVER", str(_RETRY_ON_SERVER_SIGNAL)))
 
     # ------------------------------------------------------------------
     # Public API — same signatures as before
@@ -207,12 +227,30 @@ class ManagedBrowserClient:
         )
         timeout = self._get_timeout(action)
         logger.debug("Browser %s %s (timeout=%.0fs)", method, url, timeout)
-        try:
-            raw = self._http_request(req, timeout)  # type: ignore[misc]
-        except ManagedBrowserUnavailableError:
-            raise
-        except ManagedBrowserCommandError:
-            raise
+        for attempt in range(self._retry_on_server + 1):
+            try:
+                raw = self._http_request(req, timeout)  # type: ignore[misc]
+                break
+            except ManagedBrowserUnavailableError:
+                raise
+            except ManagedBrowserCommandError as exc:
+                # Honor the server's explicit "retry": true signal (e.g. SPA
+                # navigation races, transient recovery) instead of only
+                # retrying network-level URLErrors.  The server's
+                # handle_route_error already classifies what is retryable.
+                if attempt >= self._retry_on_server or not _is_retryable_response(exc):
+                    raise
+                delay = min(1.0 * (2**attempt) + random.uniform(0, 0.5), 10.0)
+                logger.warning(
+                    "Server asked to retry %s %s (attempt %d/%d) after %.1fs: %s",
+                    method,
+                    url,
+                    attempt + 1,
+                    self._retry_on_server,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
 
         try:
             payload: Any = json.loads(raw)

@@ -28,10 +28,14 @@ def _normalize(text: str) -> str:
     return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
 
 
-def _matches_terms(text: str, query: str) -> bool:
+def _matches_terms(text: str, query: str, *, require_positives: bool = True) -> bool:
     """Check if *text* matches all positive terms and zero negative terms from *query*.
 
-    Supports quoted phrases and ``-`` prefix for negative terms.
+    Supports quoted phrases and ``-`` prefix for negative terms.  With
+    ``require_positives=False`` only the negative terms are checked locally —
+    the positive terms are assumed to have been applied by the site's own
+    search (France Travail matches broadly and truncates cards, so a literal
+    term check would drop legitimate results).
     """
     normalized = _normalize(text)
     positives: list[str] = []
@@ -39,7 +43,7 @@ def _matches_terms(text: str, query: str) -> bool:
     for quoted in re.findall(r'(-?)"([^"]+)"', query):
         term = _normalize(quoted[1])
         (negatives if quoted[0] else positives).append(term)
-    remainder = re.sub(r'-?"[^"]+"', ' ', query)
+    remainder = re.sub(r'-?"[^"]+"', " ", query)
     for token in re.findall(r"-?\w+", remainder, re.U):
         term = _normalize(token.lstrip("-"))
         if not term:
@@ -48,7 +52,9 @@ def _matches_terms(text: str, query: str) -> bool:
             negatives.append(term)
         else:
             positives.append(term)
-    return all(term in normalized for term in positives) and not any(term and term in normalized for term in negatives)
+    if require_positives and not all(term in normalized for term in positives):
+        return False
+    return not any(term and term in normalized for term in negatives)
 
 
 def _first_url(offer) -> str:

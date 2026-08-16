@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlencode, urljoin
 
 from emploi.applications import create_application_draft
@@ -92,6 +92,25 @@ def _browser(browser: BrowserLike | None) -> BrowserLike:
     return browser or ManagedBrowserClient()
 
 
+def _eval_value(payload: object, default: Any = None) -> Any:
+    """Extract the evaluated value from a ``console_eval`` response payload.
+
+    The server nests the real value under ``result.result`` (the outer
+    ``result`` object mirrors the replay step); older clients read it from
+    ``value`` directly.  Accept both, plus string-encoded JSON.
+    """
+    if not isinstance(payload, dict):
+        return default
+    if "value" in payload:
+        return payload["value"]
+    inner = payload.get("result")
+    if isinstance(inner, dict):
+        for key in ("result", "value"):
+            if key in inner:
+                return inner[key]
+    return default
+
+
 def _normalize_location(location: str) -> str:
     normalized = re.sub(r"\s+", " ", location.strip()).casefold()
     return FT_LOCATION_CODES.get(normalized, location)
@@ -134,15 +153,20 @@ Array.from(document.querySelectorAll('li.result')).map(li => {
   return {title, href: link?.href || '', text: li.innerText || '', description, contract_type: contract, html: li.outerHTML, subtext};
 })
 """.strip()
-    try:
-        result = browser.console_eval(expression, site=site, profile=profile)  # type: ignore[attr-defined]
-    except Exception:
-        return []
-    value = result.payload.get("value") if isinstance(result.payload, dict) else None
+    # France Travail's SPA loads results via XHR after DOMContentLoaded —
+    # right after the (tolerated) navigation the list can still be empty.
+    # Poll briefly before giving up.
+    for attempt in range(5):
+        try:
+            result = browser.console_eval(expression, site=site, profile=profile)  # type: ignore[attr-defined]
+        except Exception:
+            return []
+        value = _eval_value(result.payload, default=[])
+        if isinstance(value, list) and value:
+            break
+        if attempt < 4:
+            time.sleep(2.0)
     if not isinstance(value, list):
-        nested = result.payload.get("result") if isinstance(result.payload, dict) else None
-        value = nested.get("value", []) if isinstance(nested, dict) else []
-    if value is None:
         value = []
     offers: list[ExtractedOffer] = []
     for item in value:  # type: ignore[union-attr]
@@ -197,7 +221,10 @@ def _offer_is_relevant(
     text = " ".join(
         (offer.title, offer.company, offer.location, offer.description, offer.contract_type, offer.raw_text)
     )
-    if query and not _matches_terms(text, query):
+    # The site already filtered with the positive terms (its matching is
+    # broader than literal text and cards are truncated); only negative
+    # terms remain a local responsibility.
+    if query and not _matches_terms(text, query, require_positives=False):
         return False
     if (
         contract
@@ -434,10 +461,7 @@ def _extract_browser_dom_offer_detail(browser: BrowserLike, *, site: str, profil
         return ""
     if not isinstance(result.payload, dict):
         return ""
-    value = result.payload.get("value")
-    if value is None:
-        nested = result.payload.get("result")
-        value = nested.get("value") if isinstance(nested, dict) else None
+    value = _eval_value(result.payload)
     return str(value or "").strip()
 
 
@@ -554,11 +578,7 @@ def _extract_partner_handoff_from_dom(browser: BrowserLike, *, site: str, profil
 })()
 """
     result = browser.console_eval(expression, site=site, profile=profile)
-    payload = None
-    if isinstance(result.payload, dict):
-        payload = result.payload.get("value")
-        if payload is None:
-            payload = result.payload.get("result")
+    payload = _eval_value(result.payload, default=[])
     if isinstance(payload, dict) and isinstance(payload.get("value"), list):
         payload = payload["value"]
     if not isinstance(payload, list):
@@ -628,15 +648,16 @@ def _expand_apply_options(browser: BrowserLike, *, site: str, profile: str) -> b
         result = browser.console_eval(expression, site=site, profile=profile)  # type: ignore[attr-defined]
     except Exception:
         return False
-    value = result.payload.get("value") if isinstance(result.payload, dict) else None
+    value = _eval_value(result.payload)
     if isinstance(value, dict):
         return bool(value.get("clicked"))
-    nested = result.payload.get("result") if isinstance(result.payload, dict) else None
-    if isinstance(nested, dict):
-        if "clicked" in nested:
-            return bool(nested.get("clicked"))
-        if isinstance(nested.get("value"), dict):
-            return bool(nested["value"].get("clicked"))
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return bool(parsed.get("clicked"))
+        except json.JSONDecodeError:
+            pass
     return False
 
 

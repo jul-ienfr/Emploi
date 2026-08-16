@@ -20,6 +20,7 @@ Notes:
 from __future__ import annotations
 
 import os
+import time
 import traceback
 
 from emploi.browser.client import ManagedBrowserClient
@@ -33,9 +34,10 @@ def test_managed_browser_status():
     try:
         client = ManagedBrowserClient()
         result = client.status()
-        print(f"  ✅ Status: {result.payload.get('status', 'unknown')}")
-        print(f"  ✅ Profile: {result.payload.get('profile', 'unknown')}")
-        print(f"  ✅ Alive: {result.payload.get('alive', 'unknown')}")
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        print(f"  ✅ Serveur répond (ok={payload.get('ok')})")
+        print(f"  ✅ Profile: {payload.get('profile', 'unknown')}")
+        print(f"  ✅ Browser: {payload.get('engine', 'unknown')} alive={payload.get('alive', '?')}")
         return True
     except Exception as e:
         print(f"  ❌ Erreur: {e}")
@@ -119,13 +121,19 @@ def test_ft_console_eval():
           return {title: title, href: link?.href || '', text: li.innerText || ''};
         })
         """.strip()
-        result = client.console_eval(expression, profile=profile)
-        payload = result.payload
         print("  ✅ Console eval exécuté")
-        value = payload.get("value") if isinstance(payload, dict) else None
-        if value is None:
-            nested = payload.get("result") if isinstance(payload, dict) else None
-            value = nested.get("value", []) if isinstance(nested, dict) else []
+        from emploi.france_travail.flows import _eval_value
+
+        value = []
+        for attempt in range(5):
+            result = client.console_eval(expression, profile=profile)
+            value = _eval_value(result.payload, default=[])
+            if isinstance(value, list) and value:
+                break
+            if attempt < 4:
+                time.sleep(2.0)
+        if not isinstance(value, list):
+            value = []
         if isinstance(value, list):
             print(f"  📊 {len(value)} offres extraites")
             for o in value[:3]:
@@ -155,7 +163,7 @@ def test_ft_search_offers():
             results = search_offers(conn, query="python", profile=profile, radius=30, location="Bogève 74250")
             print(f"  ✅ {len(results)} offre(s) trouvée(s)")
             for r in results[:5]:
-                print(f"    - {r.title} | {r.company} | score={r.score}")
+                print(f"    - {r.title} | id={r.offer_id} | score={r.score}")
         return True
     except Exception as e:
         print(f"  ❌ Erreur: {e}")
