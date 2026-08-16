@@ -35,6 +35,9 @@ def hellowork_apply(
     ack_cgu: bool = typer.Option(
         False, "--ack-cgu", help="Confirme explicitement avoir accepté les CGU HelloWork (case HasAcceptedCGU)"
     ),
+    otp_code: str = typer.Option(
+        "", "--otp-code", help="Code de vérification email reçu (finalise la candidature HelloWork)"
+    ),
     kanban_stack: str = typer.Option("", "--kanban-stack", help="Alias/ID stack Deck candidature envoyée"),
     kanban_endpoint: str = typer.Option("", "--kanban-endpoint", help="Endpoint kanban; vide = défaut"),
     cv: str = typer.Option(
@@ -73,6 +76,7 @@ def hellowork_apply(
                 kanban_endpoint=kanban_endpoint,
                 ack_dissuasion=ack_dissuasion,
                 ack_cgu=ack_cgu,
+                otp_code=otp_code,
                 identity=identity,
                 cv_path=cv_path or None,
             )

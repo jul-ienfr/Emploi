@@ -390,6 +390,50 @@ def _load_cv_base64(cv_path: str | Path | None) -> tuple[str, str]:
     return base64.b64encode(path.read_bytes()).decode("ascii"), path.name
 
 
+def _is_otp_step(preview: str) -> bool:
+    """True si la réponse post-formulaire est l'étape de vérification email (OTP)."""
+    text = str(preview or "").casefold()
+    return bool(
+        re.search(
+            r"est-ce bien votre email|code envoy|saisissez le code|renvoyer le code|demander un nouveau code", text
+        )
+    )
+
+
+def _otp_expression(offer_external_id: str, otp_code: str) -> str:
+    """Valide le code OTP reçu par email (formulaire postotpformstepframeview)."""
+    return f"""
+(async () => {{
+  const code = {_js_string(otp_code.strip())};
+  const out = {{urlBefore: location.href, codeEntered: !!code}};
+  let form = document.querySelector('#offer-detail-main-step-otp') ||
+             Array.from(document.querySelectorAll('form')).find(f => /postotpformstepframeview/.test(f.getAttribute('action') || ''));
+  if (!form) throw new Error('Formulaire OTP HelloWork introuvable');
+  const hidden = form.querySelector('[name="OtpData.OtpCode"]');
+  if (hidden) hidden.value = code;
+  const digits = form.querySelectorAll('input[maxlength="1"]');
+  for (let i = 0; i < digits.length; i++) {{
+    digits[i].value = code[i] || '';
+  }}
+  out.hasOtpField = !!(hidden || digits.length);
+  const submitResponse = await fetch(form.getAttribute('action') || '/fr-fr/offres/postotpformstepframeview', {{
+    method: 'POST', credentials: 'include', body: new FormData(form),
+    headers: {{'Turbo-Frame': 'funnel-frame', 'X-Requested-With': 'XMLHttpRequest'}}
+  }});
+  out.submitStatus = submitResponse.status;
+  const responseText = await submitResponse.text();
+  const target = document.querySelector('#funnel-frame') || document.body;
+  target.innerHTML = responseText;
+  await new Promise(r => setTimeout(r, 800));
+  const text = document.body.innerText || '';
+  out.urlAfter = location.href;
+  out.confirmed = /candidature\\s+est\\s+envoy|candidature\\s+envoy/i.test(text);
+  out.textPreview = text.replace(/\\s+/g, ' ').slice(0, 500);
+  return JSON.stringify(out);
+}})()
+"""
+
+
 def inspect_hellowork_form(
     conn,
     offer_id: int,
@@ -540,6 +584,7 @@ def apply_hellowork(
     identity: dict[str, str] | None = None,
     cv_path: str | Path | None = None,
     ack_cgu: bool = False,
+    otp_code: str = "",
 ) -> HelloWorkApplyResult:
     if submit:
         _ensure_not_already_submitted(conn, offer_id)
@@ -640,7 +685,28 @@ def apply_hellowork(
         )
     )
     if not data.get("confirmed"):
-        raise ValueError("Confirmation HelloWork non détectée après soumission")
+        # Étape de vérification email (OTP) : le formulaire est accepté, un code
+        # a été envoyé à l'utilisateur — la candidature n'est pas encore envoyée.
+        preview = str(data.get("textPreview") or "")
+        if _is_otp_step(preview):
+            if not otp_code:
+                raise ValueError(
+                    "Vérification email HelloWork : un code a été envoyé par email. "
+                    "Relance la commande avec --otp-code XXXXXX pour finaliser (le tunnel reste ouvert, "
+                    "ne relance pas sans --otp-code : risque de doublon)."
+                )
+            otp_data = _json_from_browser_result(
+                browser.console_eval(
+                    _otp_expression(form.offer_external_id, otp_code),
+                    site=site,
+                    profile=profile,
+                )
+            )
+            if not otp_data.get("confirmed"):
+                raise ValueError("Code de vérification HelloWork refusé ou confirmation non détectée après validation")
+            data = otp_data
+        else:
+            raise ValueError("Confirmation HelloWork non détectée après soumission")
     application_id = _record_sent_application(conn, offer_id, notes="Candidature envoyée via HelloWork")
     add_offer_event(
         conn,

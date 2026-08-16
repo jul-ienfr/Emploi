@@ -31,12 +31,14 @@ class FakeBrowser:
         dissuasion_required: bool = False,
         cgu_consent_required: bool = True,
         cgu_consent_checked: bool = True,
+        otp_confirm: bool = True,
         result_key: str = "result",
     ) -> None:
         self.opened: list[str] = []
         self.expressions: list[str] = []
         self.confirm = confirm
         self.dissuasion_required = dissuasion_required
+        self.otp_confirm = otp_confirm
         self.cgu_consent_required = cgu_consent_required
         self.cgu_consent_checked = cgu_consent_checked
         self.result_key = result_key
@@ -47,12 +49,25 @@ class FakeBrowser:
 
     def console_eval(self, expression: str, *, site: str, profile: str):
         self.expressions.append(expression)
+        if "postotpformstepframeview" in expression:
+            return FakeBrowserResult(
+                {
+                    "submitStatus": 200,
+                    "confirmed": self.otp_confirm,
+                    "textPreview": "Votre candidature est envoyée, vous allez être redirigé·e"
+                    if self.otp_confirm
+                    else "Code invalide",
+                },
+                key=self.result_key,
+            )
         if "postcandidateinformationfromstepframeview" in expression:
             return FakeBrowserResult(
                 {
                     "submitStatus": 200,
                     "confirmed": self.confirm,
-                    "textPreview": "Votre candidature est envoyée, vous allez être redirigé·e",
+                    "textPreview": "Votre candidature est envoyée, vous allez être redirigé·e"
+                    if self.confirm
+                    else "Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé à j@mail.fr",
                 },
                 key=self.result_key,
             )
@@ -441,3 +456,68 @@ def test_apply_hellowork_submit_allowed_with_ack_cgu(tmp_path):
     assert submit_expr
     assert "ackCgu = true" in submit_expr[0]
     assert "HasAcceptedCGU" in submit_expr[0]
+
+
+# ---------------------------------------------------------------------------
+# Étape de vérification email (OTP) — flux validé en live (2026-08-16)
+# ---------------------------------------------------------------------------
+
+
+def test_is_otp_step_detects_email_verification_page():
+    from emploi.hellowork import _is_otp_step
+
+    assert _is_otp_step("Est-ce bien votre email ? Pour valider votre candidature, saisissez le code envoyé")
+    assert _is_otp_step("Demander un nouveau code dans 00:30")
+    assert not _is_otp_step("Votre candidature est envoyée")
+
+
+def test_apply_hellowork_submit_otp_step_requires_code(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(confirm=False)  # le POST principal mène à l'étape OTP
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+
+    assert "--otp-code" in str(excinfo.value)
+    assert "Vérification email" in str(excinfo.value)
+    assert list_applications(conn) == []  # rien d'enregistré tant que non validé
+
+
+def test_apply_hellowork_submit_finalizes_with_otp_code(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(confirm=False, otp_confirm=True)
+
+    result = apply_hellowork(
+        conn,
+        offer_id,
+        browser=browser,
+        submit=True,
+        site="france-travail",
+        profile="emploi-candidature",
+        kanban=False,
+        otp_code="123456",
+    )
+
+    assert result.submitted is True
+    otp_expr = [e for e in browser.expressions if "postotpformstepframeview" in e]
+    assert otp_expr
+    assert '"123456"' in otp_expr[0]
+    apps = list_applications(conn)
+    assert len(apps) == 1
+    assert apps[0]["status"] == "sent"
