@@ -28,7 +28,11 @@ Hypothèses (à investiguer lors d'une prochaine session) :
 - Le contrôleur Stimulus `mutable` (event `product.preselect_question`, `data-controller="mutable forced-reload-guard"`) charge la question via un fetch que l'injection brute (`target.innerHTML`) ne déclenche pas — il faut laisser **Turbo** swapper le frame `offer-detail-step-frame` et attendre le chargement (clic natif sur « Postuler » + attente longue).
 - Ou la question du recruteur n'est pas configurée côté serveur (état transitoire de l'annonce, expirée entre-temps).
 
-À retenter : clic natif sur `button[data-cy="sav2SubmitButton"]` (soumission Turbo, pas fetch), attente 5-10 s, puis lecture de la question si le contrôleur `mutable` l'a chargée.
+Progrès (2026-08-16, commit `76d0394`) :
+- Les injections n'écrasent plus le body : le frame `turbo-frame#funnel-frame` est créé s'il manque (Stimulus peut connecter les contrôleurs).
+- **Constat supplémentaire : les offres deviennent « plus disponible » dès qu'un tunnel est démarré** (Temporis 81098172 ET AFTRAL 80942431) sans que la candidature soit enregistrée dans « Mes candidatures » (vérifié : 47 candidatures, aucune nouvelle). Le blocage semble lié à l'étape elle-même (question vide), pas à l'offre.
+
+À retenter sur une **offre fraîche** (issue du scan quotidien) avec la gestion Smart Apply implémentée (`_smart_apply_expression`, boucle 3 essais, frame créé) : si la grille de questions se remplit (contrôleur mutable connecté), le CLI le signalera (`questionLabels`) pour réponse manuelle ; sinon il rapportera l'étape bloquée proprement.
 
 ## Objectif
 
