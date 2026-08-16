@@ -36,6 +36,8 @@ class HelloWorkFormState:
     submit_button_present: bool
     dissuasion_required: bool = False
     dissuasion_skills: tuple[str, ...] = ()
+    cgu_consent_required: bool = False
+    cgu_consent_checked: bool = False
 
     @property
     def required_fields_present(self) -> bool:
@@ -47,6 +49,11 @@ class HelloWorkFormState:
             and self.cv_present
             and self.submit_button_present
         )
+
+    @property
+    def cgu_consent_ok(self) -> bool:
+        """True si la case CGU est absente (pas requise) ou cochée."""
+        return not self.cgu_consent_required or self.cgu_consent_checked
 
 
 @dataclass(frozen=True)
@@ -137,17 +144,29 @@ def _browser_result_payload(result: Any) -> dict[str, Any]:
 
 
 def _browser_result_value(result: Any) -> Any:
+    """Extract the evaluated value from a ``console_eval`` response payload.
+
+    The server nests the real value under ``result.result`` (the outer
+    ``result`` object mirrors the replay step); older clients read it from
+    ``value`` directly.  Accept both, plus the legacy ``raw`` wrapper and
+    string-encoded JSON.  (Même logique que ``flows._eval_value``.)
+    """
     payload = _browser_result_payload(result)
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        if "result" in raw:
-            return raw["result"]
-        if "value" in raw:
-            return raw["value"]
-    if "result" in payload:
-        return payload["result"]
+    if not isinstance(payload, dict):
+        return payload
     if "value" in payload:
         return payload["value"]
+    raw = payload.get("raw")
+    nested = payload.get("result")
+    for wrapper in (raw, nested):
+        if isinstance(wrapper, dict):
+            for key in ("result", "value"):
+                if key in wrapper:
+                    return wrapper[key]
+    if isinstance(nested, str):
+        return nested  # legacy: JSON string direct
+    if isinstance(raw, str):
+        return raw
     return payload
 
 
@@ -195,6 +214,9 @@ def _inspect_expression(offer_external_id: str, motivation: str) -> str:
   out.lastnamePresent = !!(getValue('Lastname') || getValue('LastName'));
   out.emailPresent = !!getValue('Email');
   out.motivationPresent = !!(form && form.querySelector('[name="MotivationLetter"]'));
+  const cguField = form ? form.querySelector('[name="HasAcceptedCGU"]') : null;
+  out.cguConsentRequired = !!cguField;
+  out.cguConsentChecked = !!(cguField && cguField.checked);
   out.submitButtonPresent = !!((form && (form.querySelector('button[data-cy="submitButton"],button[type="submit"]') || Array.from(form.querySelectorAll('button')).find(button => /postuler/i.test(button.innerText || button.value || '')))) || /Postuler/i.test(initialHtml));
   if (form && motivation && form.querySelector('[name="MotivationLetter"]')) {{
     form.querySelector('[name="MotivationLetter"]').value = motivation;
@@ -297,6 +319,8 @@ def inspect_hellowork_form(
         submit_button_present=bool(data.get("submitButtonPresent")),
         dissuasion_required=bool(data.get("dissuasionRequired")),
         dissuasion_skills=tuple(str(skill) for skill in data.get("dissuasionSkills") or ()),
+        cgu_consent_required=bool(data.get("cguConsentRequired")),
+        cgu_consent_checked=bool(data.get("cguConsentChecked")),
     )
 
 
@@ -320,7 +344,11 @@ def _create_sent_deck_card(
     kanban_endpoint: str = "",
     dry_run: bool = False,
 ) -> DeckCardResult | None:
-    endpoint = emploi_config.get_kanban_endpoint(kanban_endpoint) if kanban_endpoint else emploi_config.get_default_kanban_endpoint()
+    endpoint = (
+        emploi_config.get_kanban_endpoint(kanban_endpoint)
+        if kanban_endpoint
+        else emploi_config.get_default_kanban_endpoint()
+    )
     if endpoint is None:
         if dry_run:
             return None
@@ -421,6 +449,11 @@ def apply_hellowork(
     if submit and form.dissuasion_required and not ack_dissuasion:
         skills = ", ".join(form.dissuasion_skills) or "non précisées"
         raise ValueError(f"Dissuasion HelloWork détectée ({skills}); ajoute --ack-dissuasion pour confirmer l'envoi")
+    if submit and not form.cgu_consent_ok:
+        raise ValueError(
+            "Consentement CGU HelloWork requis mais non coché (champ HasAcceptedCGU); "
+            "le CLI ne coche jamais ce champ à ta place — coche-le dans le navigateur puis relance"
+        )
     if not submit:
         add_offer_event(
             conn,
@@ -436,6 +469,8 @@ def apply_hellowork(
                     "cv_present": form.cv_present,
                     "dissuasion_required": form.dissuasion_required,
                     "dissuasion_skills": list(form.dissuasion_skills),
+                    "cgu_consent_required": form.cgu_consent_required,
+                    "cgu_consent_checked": form.cgu_consent_checked,
                 },
                 ensure_ascii=False,
             ),
@@ -443,7 +478,9 @@ def apply_hellowork(
         deck = None
         if kanban:
             try:
-                deck = _create_sent_deck_card(conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=True)
+                deck = _create_sent_deck_card(
+                    conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=True
+                )
             except Exception as error:
                 add_offer_event(
                     conn,
@@ -499,7 +536,9 @@ def apply_hellowork(
     deck = None
     if kanban:
         try:
-            deck = _create_sent_deck_card(conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=False)
+            deck = _create_sent_deck_card(
+                conn, offer_id, kanban_stack=kanban_stack, kanban_endpoint=kanban_endpoint, dry_run=False
+            )
         except Exception as error:
             add_offer_event(
                 conn,

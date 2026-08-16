@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from emploi.db import (
     add_application,
     add_offer,
@@ -22,11 +24,21 @@ class FakeBrowserResult:
 
 
 class FakeBrowser:
-    def __init__(self, *, confirm: bool = True, dissuasion_required: bool = False, result_key: str = "result") -> None:
+    def __init__(
+        self,
+        *,
+        confirm: bool = True,
+        dissuasion_required: bool = False,
+        cgu_consent_required: bool = True,
+        cgu_consent_checked: bool = True,
+        result_key: str = "result",
+    ) -> None:
         self.opened: list[str] = []
         self.expressions: list[str] = []
         self.confirm = confirm
         self.dissuasion_required = dissuasion_required
+        self.cgu_consent_required = cgu_consent_required
+        self.cgu_consent_checked = cgu_consent_checked
         self.result_key = result_key
 
     def lifecycle_open(self, url: str, *, site: str, profile: str):
@@ -62,6 +74,8 @@ class FakeBrowser:
                 "cvPresent": True,
                 "dissuasionRequired": self.dissuasion_required,
                 "dissuasionSkills": ["FIMO", "FCO", "CARTE DE CONDUCTEUR"] if self.dissuasion_required else [],
+                "cguConsentRequired": self.cgu_consent_required,
+                "cguConsentChecked": self.cgu_consent_checked,
             },
             key=self.result_key,
         )
@@ -96,7 +110,9 @@ def test_inspect_hellowork_form_resolves_url_from_offer_and_detects_required_fie
 def test_inspect_hellowork_form_accepts_console_eval_value_payload(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     browser = FakeBrowser(result_key="value")
 
     form = inspect_hellowork_form(
@@ -114,8 +130,12 @@ def test_inspect_hellowork_form_accepts_console_eval_value_payload(tmp_path):
 def test_read_draft_message_supports_generic_and_driver_headings(tmp_path):
     drafts_dir = tmp_path / "drafts"
     drafts_dir.mkdir()
-    (drafts_dir / "1-generic.md").write_text("# Draft\n\n## Message court à adapter\nBonjour générique\n\n## À vérifier\n- item\n", encoding="utf-8")
-    (drafts_dir / "2-driver.md").write_text("# Draft\n\n## Message proposé\nBonjour conducteur\n\n## À vérifier\n- item\n", encoding="utf-8")
+    (drafts_dir / "1-generic.md").write_text(
+        "# Draft\n\n## Message court à adapter\nBonjour générique\n\n## À vérifier\n- item\n", encoding="utf-8"
+    )
+    (drafts_dir / "2-driver.md").write_text(
+        "# Draft\n\n## Message proposé\nBonjour conducteur\n\n## À vérifier\n- item\n", encoding="utf-8"
+    )
 
     assert _read_draft_message(1, drafts_dir=str(drafts_dir)) == "Bonjour générique"
     assert _read_draft_message(2, drafts_dir=str(drafts_dir)) == "Bonjour conducteur"
@@ -124,7 +144,9 @@ def test_read_draft_message_supports_generic_and_driver_headings(tmp_path):
 def test_apply_hellowork_dry_run_records_preview_without_submission_or_application(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     browser = FakeBrowser()
 
     result = apply_hellowork(
@@ -150,7 +172,9 @@ def test_apply_hellowork_dry_run_records_preview_without_submission_or_applicati
 def test_apply_hellowork_submit_does_not_duplicate_existing_draft_application(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     draft_id = upsert_draft_application(conn, offer_id, draft_path="/tmp/draft.md")
     browser = FakeBrowser()
 
@@ -177,7 +201,9 @@ def test_apply_hellowork_submit_does_not_duplicate_existing_draft_application(tm
 def test_apply_hellowork_submit_refuses_dissuasion_without_ack(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     browser = FakeBrowser(dissuasion_required=True)
 
     try:
@@ -203,7 +229,9 @@ def test_apply_hellowork_submit_refuses_dissuasion_without_ack(tmp_path):
 def test_apply_hellowork_submit_allows_dissuasion_with_ack(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     browser = FakeBrowser(dissuasion_required=True)
 
     result = apply_hellowork(
@@ -226,7 +254,9 @@ def test_apply_hellowork_submit_allows_dissuasion_with_ack(tmp_path):
 def test_apply_hellowork_submit_refuses_when_already_sent(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     add_application(conn, offer_id, status="sent", notes="Déjà envoyée")
     browser = FakeBrowser()
 
@@ -253,7 +283,9 @@ def test_apply_hellowork_submit_refuses_when_already_sent(tmp_path):
 def test_apply_hellowork_submit_refuses_when_offer_status_already_sent_without_application(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     update_offer_status(conn, offer_id, "sent")
     browser = FakeBrowser()
 
@@ -278,7 +310,9 @@ def test_apply_hellowork_submit_refuses_when_offer_status_already_sent_without_a
 def test_apply_hellowork_submit_records_application_and_deck_card(tmp_path):
     conn = connect(tmp_path / "emploi.sqlite")
     init_db(conn)
-    offer_id = add_offer(conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html")
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
     browser = FakeBrowser()
 
     result = apply_hellowork(
@@ -304,3 +338,79 @@ def test_apply_hellowork_submit_records_application_and_deck_card(tmp_path):
     assert payload["source"] == "hellowork"
     assert "FunnelId" not in events[0]["payload_json"]
     assert any("postcandidateinformationfromstepframeview" in expr for expr in browser.expressions)
+
+
+# ---------------------------------------------------------------------------
+# CGU consent (HasAcceptedCGU) — nouveau champ requis depuis août 2026
+# ---------------------------------------------------------------------------
+
+
+def test_inspect_hellowork_form_detects_cgu_consent_field(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(cgu_consent_required=True, cgu_consent_checked=False)
+
+    form = inspect_hellowork_form(
+        conn,
+        offer_id,
+        browser=browser,
+        site="france-travail",
+        profile="emploi-candidature",
+    )
+
+    assert form.cgu_consent_required is True
+    assert form.cgu_consent_checked is False
+    assert form.cgu_consent_ok is False
+
+
+def test_apply_hellowork_submit_refuses_unchecked_cgu_consent(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(cgu_consent_required=True, cgu_consent_checked=False)
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_hellowork(
+            conn,
+            offer_id,
+            browser=browser,
+            submit=True,
+            site="france-travail",
+            profile="emploi-candidature",
+            kanban=False,
+        )
+
+    assert "HasAcceptedCGU" in str(excinfo.value)
+    assert "jamais ce champ" in str(excinfo.value)
+    # aucune expression de soumission ne doit avoir été envoyée au navigateur
+    assert not any("postcandidateinformationfromstepframeview" in expr for expr in browser.expressions)
+    assert list_applications(conn) == []
+
+
+def test_apply_hellowork_dry_run_allowed_with_unchecked_cgu_consent(tmp_path):
+    conn = connect(tmp_path / "emploi.sqlite")
+    init_db(conn)
+    offer_id = add_offer(
+        conn, title="Chauffeur PL", company="Slash Intérim", url="https://www.hellowork.com/fr-fr/emplois/123.html"
+    )
+    browser = FakeBrowser(cgu_consent_required=True, cgu_consent_checked=False)
+
+    result = apply_hellowork(
+        conn,
+        offer_id,
+        browser=browser,
+        site="france-travail",
+        profile="emploi-candidature",
+        kanban=False,
+    )
+
+    assert result.dry_run is True
+    events = list_offer_events(conn, offer_id)
+    payload = json.loads(events[0]["payload_json"])
+    assert payload["cgu_consent_required"] is True
+    assert payload["cgu_consent_checked"] is False

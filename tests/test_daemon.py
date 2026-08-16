@@ -61,8 +61,7 @@ def test_run_all_profiles_handles_error_in_profile(tmp_path, monkeypatch):
 def test_watch_loop_once_runs_one_cycle(tmp_path, monkeypatch):
     """watch_loop(once=True) should execute exactly one cycle and stop."""
     db_path = tmp_path / "emploi.sqlite"
-    monkeypatch.setenv("EMPLOI_DB", str(db_path)
-    )
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
     with connect(db_path) as conn:
         init_db(conn)
         add_saved_search(conn, name="test", query="python", enabled=True)
@@ -88,3 +87,24 @@ def test_watch_loop_once_handles_empty_profiles(tmp_path, monkeypatch):
         init_db(conn)
 
     watch_loop(interval_minutes=60, once=True)
+
+
+def test_run_swiss_sources_handles_sqlite_rows(tmp_path, monkeypatch):
+    """sqlite3.Row n'a pas de .get() — la lecture doit utiliser les index (régression)."""
+    db_path = tmp_path / "emploi.sqlite"
+    monkeypatch.setenv("EMPLOI_DB", str(db_path))
+    with connect(db_path) as conn:
+        init_db(conn)
+        add_saved_search(conn, name="ch-profile", query="chauffeur", where_text="Genève", enabled=True)
+        profiles = conn.execute("SELECT * FROM saved_searches").fetchall()  # sqlite3.Row
+
+    with patch("emploi.sources.aggregator.search_all") as mock_search:
+        mock_search.return_value = []
+        from emploi.daemon import _run_swiss_sources
+
+        with connect(db_path) as conn:
+            created, errors = _run_swiss_sources(conn, profiles)
+
+        mock_search.assert_called_once()
+        assert created == 0
+        assert errors == []

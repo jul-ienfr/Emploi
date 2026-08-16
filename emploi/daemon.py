@@ -112,8 +112,9 @@ def _run_swiss_sources(conn: Connection, profiles) -> tuple[int, list[str]]:
     total_created = 0
 
     for saved in profiles:
-        query = str(saved.get("query", "") or "")
-        location = str(saved.get("where_text", "") or "")
+        # sqlite3.Row n'a pas de .get() : accès par index (list_saved_searches fait SELECT *)
+        query = str(saved["query"] or "")
+        location = str(saved["where_text"] or "")
         if not query:
             continue
 
