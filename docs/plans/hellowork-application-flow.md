@@ -34,6 +34,14 @@ Progrès (2026-08-16, commit `76d0394`) :
 
 À retenter sur une **offre fraîche** (issue du scan quotidien) avec la gestion Smart Apply implémentée (`_smart_apply_expression`, boucle 3 essais, frame créé) : si la grille de questions se remplit (contrôleur mutable connecté), le CLI le signalera (`questionLabels`) pour réponse manuelle ; sinon il rapportera l'étape bloquée proprement.
 
+### ✅ PREMIÈRE CANDIDATURE RÉELLE ENVOYÉE (2026-08-16, offre 80750290 — Ortec Group, Bonneville)
+
+**« Mes candidatures » : 48 entrées (était 47) — « Envoyée Chauffeur PL H/F — Ortec Group — Bonneville — Envoyée le 16 août ».** Le tunnel de cette offre s'est finalisé **directement** (pas d'OTP, pas de smart-apply) : identité pré-remplie + POST principal → réponse « Votre candidature est envoyée, vous allez être redirigé·e ». Enregistrement local fait (application #2, offre 98 → sent, événement `application_submitted`).
+
+Observations clés du succès :
+- **Le POST a abouti SANS upload CV** (le CV est attaché au compte, pas besoin de JweHashResume pour ce tunnel ; `cvPresent` reste vrai dans l'uploader).
+- Les funnels varient par offre : direct (98), OTP (63), smart-apply (62/60), CGU présent/absent — le CLI gère les trois, la confirmation directe reste la plus simple.
+
 ### Dernier état (2026-08-16, offre 80808238 Temporis Contamine) — validation du pré-remplissage
 
 Le flux complet est désormais validé jusqu'au POST smart-apply inclus :
