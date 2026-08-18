@@ -138,7 +138,7 @@ def test_browser_smoke_json_reports_status_and_snapshot(monkeypatch):
     monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.status", fake_status)
     monkeypatch.setattr("emploi.browser.client.ManagedBrowserClient.snapshot", fake_snapshot)
 
-    result = runner.invoke(app, ["browser", "smoke", "--json"])
+    result = runner.invoke(app, ["browser", "smoke", "--json", "--profile", "emploi-candidature"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "ok"

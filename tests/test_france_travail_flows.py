@@ -513,7 +513,7 @@ def test_open_partner_offer_reports_missing_partner_without_opening_external_url
     )
 
     try:
-        open_partner_offer(conn, offer_id, "hellowork", browser=browser)
+        open_partner_offer(conn, offer_id, "hellowork", browser=browser, profile="emploi-candidature")
     except ValueError as error:
         message = str(error)
     else:  # pragma: no cover
@@ -541,7 +541,7 @@ def test_open_partner_offer_reports_missing_partner_url_without_external_open(tm
     browser = FakeBrowser([{"text": "Choisissez le partenaire de votre choix : Meteojob HelloWork"}])
 
     try:
-        open_partner_offer(conn, offer_id, "hellowork", browser=browser)
+        open_partner_offer(conn, offer_id, "hellowork", browser=browser, profile="emploi-candidature")
     except ValueError as error:
         message = str(error)
     else:  # pragma: no cover
