@@ -103,6 +103,15 @@ def _patch_everything(monkeypatch):
     monkeypatch.setattr("emploi.nextcloud_files.urllib.request.urlopen", _universal_urlopen)
     monkeypatch.setattr("emploi.nextcloud_tasks.urllib.request.urlopen", _universal_urlopen)
     monkeypatch.setattr("emploi.utils._pass_show", lambda entry: "fake-secret")
+    # _pass_show est importé PAR NOM (`from emploi.utils import _pass_show`) dans ces
+    # modules : la référence est figée à l'import (avant les fixtures) et le patch
+    # ci-dessus ne la rebind pas. Sans ces patches, le vrai `pass show` (subprocess)
+    # s'exécute dans les tests — OK en local (pass installé), FileNotFoundError sur
+    # les runners CI sans binaire `pass` → nextcloud_deck_card_failed intempestif.
+    monkeypatch.setattr("emploi.nextcloud_deck._pass_show", lambda entry: "fake-secret")
+    monkeypatch.setattr("emploi.nextcloud_tasks._pass_show", lambda entry: "fake-secret")
+    monkeypatch.setattr("emploi.nextcloud_files._pass_show", lambda entry: "fake-secret")
+    monkeypatch.setattr("emploi.nextcloud_contacts._pass_show", lambda entry: "fake-secret")
     monkeypatch.setattr("emploi.retry.time.sleep", lambda _: None)
 
 
@@ -341,6 +350,9 @@ def test_hellowork_apply_submit_cli_records_sent_and_uses_configured_deck_stack(
     assert "Candidature locale" in result.stdout
     with connect(db_path) as conn:
         events = list_offer_events(conn, offer_id)
-    assert events[0]["event_type"] == "nextcloud_deck_card"
+    assert events[0]["event_type"] == "nextcloud_deck_card", {
+        "events": [dict(event) for event in events],
+        "deck_requests": deck_requests,
+    }
     assert events[1]["event_type"] == "application_submitted"
     assert deck_requests
