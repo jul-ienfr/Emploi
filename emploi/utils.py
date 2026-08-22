@@ -28,6 +28,11 @@ def _normalize(text: str) -> str:
     return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
 
 
+def _expand_pl_aliases(normalized: str) -> str:
+    """Expand isolated 'pl' -> 'poids lourd' so 'Chauffeur PL' matches 'poids lourd'."""
+    return re.sub(r"\bpl\b", "poids lourd", normalized)
+
+
 def _matches_terms(text: str, query: str, *, require_positives: bool = True) -> bool:
     """Check if *text* matches all positive terms and zero negative terms from *query*.
 
@@ -37,15 +42,15 @@ def _matches_terms(text: str, query: str, *, require_positives: bool = True) -> 
     search (France Travail matches broadly and truncates cards, so a literal
     term check would drop legitimate results).
     """
-    normalized = _normalize(text)
+    normalized = _expand_pl_aliases(_normalize(text))
     positives: list[str] = []
     negatives: list[str] = []
     for quoted in re.findall(r'(-?)"([^"]+)"', query):
-        term = _normalize(quoted[1])
+        term = _expand_pl_aliases(_normalize(quoted[1]))
         (negatives if quoted[0] else positives).append(term)
     remainder = re.sub(r'-?"[^"]+"', " ", query)
     for token in re.findall(r"-?\w+", remainder, re.U):
-        term = _normalize(token.lstrip("-"))
+        term = _expand_pl_aliases(_normalize(token.lstrip("-")))
         if not term:
             continue
         if token.startswith("-"):

@@ -221,10 +221,9 @@ def _offer_is_relevant(
     text = " ".join(
         (offer.title, offer.company, offer.location, offer.description, offer.contract_type, offer.raw_text)
     )
-    # The site already filtered with the positive terms (its matching is
-    # broader than literal text and cards are truncated); only negative
-    # terms remain a local responsibility.
-    if query and not _matches_terms(text, query, require_positives=False):
+    # Require positives locally (with PL->poids lourd alias) — trusting FT
+    # alone lets unrelated offers (paysagiste, dev, etc.) leak through.
+    if query and not _matches_terms(text, query, require_positives=True):
         return False
     if (
         contract
